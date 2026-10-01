@@ -1,344 +1,124 @@
+<?php
+// Frontend/student-dashboard.php
+session_start();
+require_once __DIR__ . '/../Backend/db.php';
+require_once __DIR__ . '/../Backend/auth.php';
+require_role('student');
+
+$studentId = (int) $_SESSION['user_id'];
+
+// This student's wallet and the sponsor who controls it
+$stmt = $conn->prepare(
+    'SELECT w.id, w.balance, w.status, s.full_name AS sponsor_name
+     FROM wallets w
+     JOIN users s ON s.id = w.sponsor_id
+     WHERE w.student_id = ?
+     LIMIT 1'
+);
+$stmt->bind_param('i', $studentId);
+$stmt->execute();
+$wallet = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+// Last 10 transactions
+$transactions = [];
+if ($wallet) {
+    $stmt = $conn->prepare(
+        'SELECT type, amount, balance_after, description, created_at
+         FROM transactions
+         WHERE wallet_id = ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT 10'
+    );
+    $stmt->bind_param('i', $wallet['id']);
+    $stmt->execute();
+    $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Student Dashboard | Sponsor Wallet System</title>
-
-    <link rel="stylesheet" href="../css/global.css">
-    <link rel="stylesheet" href="../css/dashboard.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Student Dashboard | SponsorWallet</title>
+  <style>
+    :root { --forest:#0f3d3a; --forest-2:#17524d; --paper:#f1f5f0; --ink:#1b2a29; --muted:#5d6f6c; --line:#cfdad6; --saffron:#f2b134; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", Arial, sans-serif; background: var(--paper); color: var(--ink); line-height: 1.5; }
+    header { background: var(--forest); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header strong { font-size: 1.15rem; }
+    header a { color: #fff; font-weight: 600; }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; display: grid; gap: 24px; }
+    h1 { color: var(--forest); font-size: 1.6rem; }
+    h2 { color: var(--forest); font-size: 1.15rem; margin-bottom: 12px; }
+    .sub { color: var(--muted); }
+    .card { background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 22px; }
+    .balance-card { background: var(--forest); color: #fff; border: 0; }
+    .balance-card .sub { color: #a9c4bf; }
+    .big { font-size: 2.4rem; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: .92rem; }
+    th { color: var(--muted); font-weight: 600; }
+    td.num, th.num { text-align: right; }
+    .in { color: #1d6b3a; font-weight: 600; }
+    .out { color: #b3261e; font-weight: 600; }
+    .table-wrap { overflow-x: auto; }
+    .empty { color: var(--muted); }
+    .badge { font-size: .75rem; padding: 2px 8px; border-radius: 99px; background: #fde7c0; color: var(--ink); margin-left: 6px; }
+  </style>
 </head>
-
 <body>
+  <header>
+    <strong>SponsorWallet</strong>
+    <span>Hello, <?= htmlspecialchars($_SESSION['full_name']) ?> &nbsp;|&nbsp; <a href="../Backend/logout.php">Log out</a></span>
+  </header>
 
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
+  <main>
+    <h1>Student dashboard</h1>
 
-        <div class="logo">
-            <h2>SW Wallet</h2>
-            <p>Student Portal</p>
+    <?php if (!$wallet): ?>
+      <section class="card">
+        <h2>No wallet yet</h2>
+        <p class="empty">Your sponsor needs to create a wallet for you. Give them the email or phone number you registered with.</p>
+      </section>
+
+    <?php else: ?>
+      <section class="card balance-card">
+        <div class="sub">Wallet balance
+          <?php if ($wallet['status'] !== 'active'): ?><span class="badge"><?= htmlspecialchars($wallet['status']) ?></span><?php endif; ?>
         </div>
-
-        <nav class="navigation">
-
-            <a href="#" class="nav-link active">
-                <span>▣</span>
-                Dashboard
-            </a>
-
-            <a href="#" class="nav-link">
-                <span>▤</span>
-                My Budget
-            </a>
-
-            <a href="#" class="nav-link">
-                <span>↕</span>
-                Spending
-            </a>
-
-            <a href="#" class="nav-link">
-                <span>▣</span>
-                Transactions
-            </a>
-
-            <a href="#" class="nav-link">
-                <span>◉</span>
-                Profile
-            </a>
-
-        </nav>
-
-        <div class="sidebar-bottom">
-            <a href="#" class="nav-link logout">
-                <span>↪</span>
-                Logout
-            </a>
-        </div>
-
-    </aside>
-
-
-    <!-- MAIN CONTENT -->
-    <main class="main-content">
-
-        <!-- TOP BAR -->
-        <header class="topbar">
-
-            <div>
-                <h1>Student Dashboard</h1>
-
-                <p>
-                    Manage your sponsored educational funds.
-                </p>
-            </div>
-
-            <div class="student-profile">
-
-                <div class="student-details">
-                    <strong>Ali Omar</strong>
-                    <small>University Student</small>
-                </div>
-
-                <div class="profile-circle">
-                    A
-                </div>
-
-            </div>
-
-        </header>
-
-
-        <!-- DASHBOARD -->
-        <section class="dashboard">
-
-            <!-- WALLET -->
-            <div class="wallet-card">
-
-                <div class="wallet-information">
-
-                    <p class="wallet-label">
-                        Available Wallet Balance
-                    </p>
-
-                    <h2>
-                        KSh 25,000.00
-                    </h2>
-
-                    <p class="wallet-description">
-                        Funds currently available in your wallet
-                    </p>
-
-                </div>
-
-                <div class="wallet-symbol">
-                    KSh
-                </div>
-
-            </div>
-
-
-            <!-- SUMMARY -->
-            <div class="summary-container">
-
-                <div class="summary-card">
-
-                    <div class="summary-icon">
-                        B
-                    </div>
-
-                    <div>
-                        <p>Total Budget</p>
-                        <h3>KSh 20,000</h3>
-                    </div>
-
-                </div>
-
-
-                <div class="summary-card">
-
-                    <div class="summary-icon">
-                        S
-                    </div>
-
-                    <div>
-                        <p>Total Spent</p>
-                        <h3>KSh 5,000</h3>
-                    </div>
-
-                </div>
-
-
-                <div class="summary-card">
-
-                    <div class="summary-icon">
-                        R
-                    </div>
-
-                    <div>
-                        <p>Remaining Budget</p>
-                        <h3>KSh 15,000</h3>
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <!-- LOWER SECTION -->
-            <div class="dashboard-grid">
-
-
-                <!-- BUDGET -->
-                <div class="dashboard-card">
-
-                    <div class="card-header">
-
-                        <div>
-                            <h2>My Budget</h2>
-                            <p>Your current budget allocations</p>
-                        </div>
-
-                        <button id="addBudgetButton">
-                            + Add Budget
-                        </button>
-
-                    </div>
-
-
-                    <div class="budget-list">
-
-                        <div class="budget-item">
-
-                            <div>
-                                <strong>Food</strong>
-                                <p>Budget: KSh 5,000</p>
-                            </div>
-
-                            <span>
-                                KSh 3,000 left
-                            </span>
-
-                        </div>
-
-
-                        <div class="budget-item">
-
-                            <div>
-                                <strong>Transport</strong>
-                                <p>Budget: KSh 3,000</p>
-                            </div>
-
-                            <span>
-                                KSh 2,000 left
-                            </span>
-
-                        </div>
-
-
-                        <div class="budget-item">
-
-                            <div>
-                                <strong>Academic Materials</strong>
-                                <p>Budget: KSh 4,000</p>
-                            </div>
-
-                            <span>
-                                KSh 4,000 left
-                            </span>
-
-                        </div>
-
-
-                        <div class="budget-item">
-
-                            <div>
-                                <strong>Rent</strong>
-                                <p>Budget: KSh 8,000</p>
-                            </div>
-
-                            <span>
-                                KSh 6,000 left
-                            </span>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-
-                <!-- TRANSACTIONS -->
-                <div class="dashboard-card">
-
-                    <div class="card-header">
-
-                        <div>
-                            <h2>Recent Transactions</h2>
-                            <p>Your latest wallet activity</p>
-                        </div>
-
-                        <button id="viewTransactionsButton">
-                            View All
-                        </button>
-
-                    </div>
-
-
-                    <div class="transaction-list">
-
-
-                        <div class="transaction-item">
-
-                            <div class="transaction-information">
-
-                                <strong>Food</strong>
-
-                                <small>
-                                    28 Sept 2026
-                                </small>
-
-                            </div>
-
-                            <span class="expense">
-                                - KSh 500
-                            </span>
-
-                        </div>
-
-
-                        <div class="transaction-item">
-
-                            <div class="transaction-information">
-
-                                <strong>Transport</strong>
-
-                                <small>
-                                    27 Sept 2026
-                                </small>
-
-                            </div>
-
-                            <span class="expense">
-                                - KSh 300
-                            </span>
-
-                        </div>
-
-
-                        <div class="transaction-item">
-
-                            <div class="transaction-information">
-
-                                <strong>Wallet Funding</strong>
-
-                                <small>
-                                    25 Sept 2026
-                                </small>
-
-                            </div>
-
-                            <span class="income">
-                                + KSh 20,000
-                            </span>
-
-                        </div>
-
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
-
-    </main>
-
-
-    <script src="../js/student.js"></script>
-
+        <div class="big">KES <?= number_format((float) $wallet['balance'], 2) ?></div>
+        <div class="sub">Sponsored by <?= htmlspecialchars($wallet['sponsor_name']) ?></div>
+      </section>
+
+      <section class="card">
+        <h2>Recent activity</h2>
+        <?php if (!$transactions): ?>
+          <p class="empty">No transactions yet. Funds your sponsor adds will show up here.</p>
+        <?php else: ?>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Details</th><th class="num">Amount</th><th class="num">Balance</th></tr>
+              </thead>
+              <tbody>
+              <?php foreach ($transactions as $t): ?>
+                <tr>
+                  <td><?= htmlspecialchars(date('d M Y, H:i', strtotime($t['created_at']))) ?></td>
+                  <td><?= htmlspecialchars($t['description'] ?? '') ?></td>
+                  <td class="num <?= $t['type'] === 'funding' ? 'in' : 'out' ?>">
+                    <?= $t['type'] === 'funding' ? '+' : '-' ?><?= number_format((float) $t['amount'], 2) ?>
+                  </td>
+                  <td class="num"><?= number_format((float) $t['balance_after'], 2) ?></td>
+                </tr>
+              <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </section>
+    <?php endif; ?>
+  </main>
 </body>
-
 </html>

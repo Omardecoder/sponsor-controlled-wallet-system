@@ -223,7 +223,7 @@ $roles = [
         <p class="sub">It takes less than a minute.</p>
 
         <!-- Visual only for now: validation and saving will be added in the next step -->
-        <form action="#" method="post" novalidate>
+        <form action="../Backend/register_process.php" method="post" novalidate>
 
           <div class="field">
             <label for="full_name">Full name</label>

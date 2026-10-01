@@ -206,7 +206,7 @@ $tagline = 'Sponsor-controlled wallets';
         <p class="sub">Use the email or phone number you registered with.</p>
 
         <!-- Visual only for now: processing will be added in the next step -->
-        <form action="#" method="post" novalidate>
+        <form action="../Backend/register_process.php" method="post" novalidate>
           <div class="field">
             <label for="identifier">Email or phone number</label>
             <input type="text" id="identifier" name="identifier" placeholder="you@example.com or 0712 345 678" autocomplete="username" required>
