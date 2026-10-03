@@ -9,9 +9,9 @@ require_once __DIR__ . '/db.php';
 // Where each role lands after a successful login.
 // (Create these pages in the frontend folder as you build the dashboards.)
 $dashboards = [
-    'student' => '../frontend/student_dashboard.php',
-    'sponsor' => '../frontend/sponsor_dashboard.php',
-    'admin'   => '../frontend/admin_dashboard.php',
+    'student' => '../Frontend/student-dashboard.php',
+    'sponsor' => '../Frontend/sponsor-dashboard.php',
+    'admin'   => '../Frontend/admin-dashboard.php',
 ];
 
 // Send the user back to the login page with an error message
@@ -19,13 +19,13 @@ function fail(string $message, string $identifier = ''): void
 {
     $_SESSION['login_error'] = $message;
     $_SESSION['login_old_identifier'] = $identifier;
-    header('Location: ../frontend/login.php');
+    header('Location: ../Frontend/login.php');
     exit;
 }
 
 // Only accept form submissions (POST), not someone typing the URL
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ../frontend/login.php');
+    header('Location: ../Frontend/login.php');
     exit;
 }
 

@@ -29,5 +29,5 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
 // 5. Redirect to the login page
-header('Location: ../frontend/login.php');
+header('Location: ../Frontend/login.php');
 exit;

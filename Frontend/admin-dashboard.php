@@ -1,11 +1,8 @@
 <?php
 // frontend/admin_dashboard.php  (placeholder)
 session_start();
-if (empty($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: login.php');
-    exit;
-}
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+require_once __DIR__ . '/../Backend/auth.php';
+require_role('admin');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -24,7 +21,7 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
   <div class="box">
     <h1>Welcome, <?= htmlspecialchars($_SESSION['full_name']) ?></h1>
     <p>Admin dashboard (placeholder). We'll build this out later.</p>
-    <p><a href="../backend/logout.php">Log out</a></p>
+    <p><a href="../Backend/logout.php">Log out</a></p>
   </div>
 </body>
 </html>

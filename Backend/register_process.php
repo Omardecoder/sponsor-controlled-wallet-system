@@ -13,12 +13,12 @@ function back_with_errors(array $errors, array $old): void
     $_SESSION['register_errors'] = $errors;
     unset($old['password'], $old['confirm_password']);   // never send passwords back
     $_SESSION['register_old'] = $old;
-    header('Location: ../frontend/register.php');
+    header('Location: ../Frontend/register.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ../frontend/register.php');
+    header('Location: ../Frontend/register.php');
     exit;
 }
 
@@ -90,5 +90,5 @@ try {
 }
 
 $_SESSION['flash_success'] = 'Account created. You can log in now.';
-header('Location: ../frontend/login.php');
+header('Location: ../Frontend/login.php');
 exit;

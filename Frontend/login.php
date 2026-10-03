@@ -1,6 +1,12 @@
 <?php
-// frontend/login.php
-// Step 2: visual login page only. Authentication logic comes in a later step.
+// Frontend/login.php
+session_start();
+
+// Messages left by Backend/login_process.php or register_process.php (shown once)
+$error   = $_SESSION['login_error'] ?? '';
+$success = $_SESSION['flash_success'] ?? '';
+$oldId   = $_SESSION['login_old_identifier'] ?? '';
+unset($_SESSION['login_error'], $_SESSION['flash_success'], $_SESSION['login_old_identifier']);
 
 $appName = 'SponsorWallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
@@ -105,6 +111,11 @@ $tagline = 'Sponsor-controlled wallets';
     }
     .form-wrap .sub { margin-top: 6px; color: var(--muted); }
 
+    .alert { margin-top: 20px; padding: 12px 14px; border-radius: 10px; font-size: .92rem; }
+    .alert-error { background: #fbe9e7; color: var(--danger); border: 1px solid #f1c3bd; }
+    .alert-success { background: #e6f2ea; color: #1d6b3a; border: 1px solid #bfdcc8; }
+    .alert ul { margin: 0; padding-left: 18px; }
+
     form { margin-top: 28px; display: grid; gap: 18px; }
     .field label { display: block; font-weight: 600; font-size: .92rem; margin-bottom: 6px; }
     .input-box { position: relative; }
@@ -205,11 +216,13 @@ $tagline = 'Sponsor-controlled wallets';
         <h2>Log in</h2>
         <p class="sub">Use the email or phone number you registered with.</p>
 
-        <!-- Visual only for now: processing will be added in the next step -->
-        <form action="../Backend/register_process.php" method="post" novalidate>
+        <?php if ($success): ?><div class="alert alert-success" role="status"><?= htmlspecialchars($success) ?></div><?php endif; ?>
+        <?php if ($error): ?><div class="alert alert-error" role="alert"><?= htmlspecialchars($error) ?></div><?php endif; ?>
+
+        <form action="../Backend/login_process.php" method="post" novalidate>
           <div class="field">
             <label for="identifier">Email or phone number</label>
-            <input type="text" id="identifier" name="identifier" placeholder="you@example.com or 0712 345 678" autocomplete="username" required>
+            <input type="text" id="identifier" name="identifier" placeholder="you@example.com or 0712 345 678" value="<?= htmlspecialchars($oldId) ?>" autocomplete="username" required>
           </div>
 
           <div class="field">

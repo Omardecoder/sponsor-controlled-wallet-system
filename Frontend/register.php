@@ -1,6 +1,12 @@
 <?php
-// frontend/register.php
-// Step 3: visual registration page only. Validation and saving come in a later step.
+// Frontend/register.php
+session_start();
+
+// Errors and previous answers left by Backend/register_process.php (shown once)
+$errors = $_SESSION['register_errors'] ?? [];
+$oldData = $_SESSION['register_old'] ?? [];
+unset($_SESSION['register_errors'], $_SESSION['register_old']);
+$old = fn(string $k) => htmlspecialchars($oldData[$k] ?? '');
 //
 // NOTE: Public registration allows only "student" and "sponsor".
 // Admin accounts must never be selectable here. Create them manually
@@ -105,6 +111,11 @@ $roles = [
       color: var(--forest);
     }
     .form-wrap .sub { margin-top: 6px; color: var(--muted); }
+
+    .alert { margin-top: 20px; padding: 12px 14px; border-radius: 10px; font-size: .92rem; }
+    .alert-error { background: #fbe9e7; color: var(--danger); border: 1px solid #f1c3bd; }
+    .alert-success { background: #e6f2ea; color: #1d6b3a; border: 1px solid #bfdcc8; }
+    .alert ul { margin: 0; padding-left: 18px; }
 
     form { margin-top: 28px; display: grid; gap: 18px; }
     .field label, .legend { display: block; font-weight: 600; font-size: .92rem; margin-bottom: 6px; }
@@ -222,22 +233,25 @@ $roles = [
         <h2>Create your account</h2>
         <p class="sub">It takes less than a minute.</p>
 
-        <!-- Visual only for now: validation and saving will be added in the next step -->
+        <?php if ($errors): ?>
+          <div class="alert alert-error" role="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul></div>
+        <?php endif; ?>
+
         <form action="../Backend/register_process.php" method="post" novalidate>
 
           <div class="field">
             <label for="full_name">Full name</label>
-            <input type="text" id="full_name" name="full_name" placeholder="e.g. Amina Wanjiru" autocomplete="name" required>
+            <input type="text" id="full_name" name="full_name" value="<?= $old('full_name') ?>" placeholder="e.g. Amina Wanjiru" autocomplete="name" required>
           </div>
 
           <div class="two-col">
             <div class="field">
               <label for="email">Email</label>
-              <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+              <input type="email" id="email" name="email" value="<?= $old('email') ?>" placeholder="you@example.com" autocomplete="email" required>
             </div>
             <div class="field">
               <label for="phone">Phone number</label>
-              <input type="tel" id="phone" name="phone" placeholder="0712 345 678" autocomplete="tel" required>
+              <input type="tel" id="phone" name="phone" value="<?= $old('phone') ?>" placeholder="0712 345 678" autocomplete="tel" required>
             </div>
           </div>
 
@@ -262,7 +276,7 @@ $roles = [
             <div class="role-grid">
               <?php foreach ($roles as $value => [$label, $desc]): ?>
                 <label class="role">
-                  <input type="radio" name="role" value="<?= htmlspecialchars($value) ?>" required>
+                  <input type="radio" name="role" value="<?= htmlspecialchars($value) ?>" <?= $old('role') === $value ? 'checked' : '' ?> required>
                   <span class="role-card">
                     <strong><?= htmlspecialchars($label) ?></strong>
                     <span><?= htmlspecialchars($desc) ?></span>
