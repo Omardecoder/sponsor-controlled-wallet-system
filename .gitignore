@@ -1,0 +1,4 @@
+.vscode/
+*.log
+Backend/test_*.php
+Backend/create_test_user.php

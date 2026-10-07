@@ -1,12 +1,12 @@
 <?php
-// Frontend/login.php
+// frontend/login.php
+// Posts to ../Backend/login_process.php. Errors come back through the session.
 session_start();
 
-// Messages left by Backend/login_process.php or register_process.php (shown once)
-$error   = $_SESSION['login_error'] ?? '';
+$error = $_SESSION['login_error'] ?? '';
+$oldIdentifier = $_SESSION['login_old_identifier'] ?? '';
 $success = $_SESSION['flash_success'] ?? '';
-$oldId   = $_SESSION['login_old_identifier'] ?? '';
-unset($_SESSION['login_error'], $_SESSION['flash_success'], $_SESSION['login_old_identifier']);
+unset($_SESSION['login_error'], $_SESSION['login_old_identifier'], $_SESSION['flash_success']);
 
 $appName = 'SponsorWallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
@@ -111,11 +111,6 @@ $tagline = 'Sponsor-controlled wallets';
     }
     .form-wrap .sub { margin-top: 6px; color: var(--muted); }
 
-    .alert { margin-top: 20px; padding: 12px 14px; border-radius: 10px; font-size: .92rem; }
-    .alert-error { background: #fbe9e7; color: var(--danger); border: 1px solid #f1c3bd; }
-    .alert-success { background: #e6f2ea; color: #1d6b3a; border: 1px solid #bfdcc8; }
-    .alert ul { margin: 0; padding-left: 18px; }
-
     form { margin-top: 28px; display: grid; gap: 18px; }
     .field label { display: block; font-weight: 600; font-size: .92rem; margin-bottom: 6px; }
     .input-box { position: relative; }
@@ -157,6 +152,13 @@ $tagline = 'Sponsor-controlled wallets';
     .btn:hover { background: var(--forest-2); }
     .btn:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
 
+    .alert {
+      margin-top: 22px; padding: 12px 14px; border-radius: 10px;
+      background: #fbe9e7; border: 1.5px solid #e8b4ae; color: var(--danger);
+      font-size: .92rem; font-weight: 500;
+    }
+    .alert-success { background: #e4f3ea; border-color: #a9d3b9; color: #1d6b3a; }
+    .alert + form { margin-top: 18px; }
     .register { margin-top: 24px; text-align: center; color: var(--muted); }
 
     @media (max-width: 860px) {
@@ -216,13 +218,17 @@ $tagline = 'Sponsor-controlled wallets';
         <h2>Log in</h2>
         <p class="sub">Use the email or phone number you registered with.</p>
 
-        <?php if ($success): ?><div class="alert alert-success" role="status"><?= htmlspecialchars($success) ?></div><?php endif; ?>
-        <?php if ($error): ?><div class="alert alert-error" role="alert"><?= htmlspecialchars($error) ?></div><?php endif; ?>
+        <?php if ($success !== ''): ?>
+          <div class="alert alert-success" role="status"><?= htmlspecialchars($success) ?></div>
+        <?php endif; ?>
+        <?php if ($error !== ''): ?>
+          <div class="alert" role="alert"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
 
         <form action="../Backend/login_process.php" method="post" novalidate>
           <div class="field">
             <label for="identifier">Email or phone number</label>
-            <input type="text" id="identifier" name="identifier" placeholder="you@example.com or 0712 345 678" value="<?= htmlspecialchars($oldId) ?>" autocomplete="username" required>
+            <input type="text" id="identifier" name="identifier" placeholder="you@example.com or 0712 345 678" autocomplete="username" value="<?= htmlspecialchars($oldIdentifier) ?>" required>
           </div>
 
           <div class="field">
@@ -235,7 +241,6 @@ $tagline = 'Sponsor-controlled wallets';
 
           <div class="row">
             <label class="remember"><input type="checkbox" name="remember"> Keep me logged in</label>
-            <a href="forgot_password.php">Forgot password?</a>
           </div>
 
           <button type="submit" class="btn">Log in</button>

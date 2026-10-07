@@ -1,16 +1,16 @@
 <?php
-// Frontend/register.php
-session_start();
-
-// Errors and previous answers left by Backend/register_process.php (shown once)
-$errors = $_SESSION['register_errors'] ?? [];
-$oldData = $_SESSION['register_old'] ?? [];
-unset($_SESSION['register_errors'], $_SESSION['register_old']);
-$old = fn(string $k) => htmlspecialchars($oldData[$k] ?? '');
+// frontend/register.php
+// Posts to ../Backend/register_process.php. Errors and old input come back through the session.
 //
 // NOTE: Public registration allows only "student" and "sponsor".
 // Admin accounts must never be selectable here. Create them manually
 // in the database or from a protected admin-only page.
+
+session_start();
+$errors = $_SESSION['register_errors'] ?? [];
+$old    = $_SESSION['register_old'] ?? [];
+unset($_SESSION['register_errors'], $_SESSION['register_old']);
+$old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => ''];
 
 $appName = 'SponsorWallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
@@ -112,11 +112,6 @@ $roles = [
     }
     .form-wrap .sub { margin-top: 6px; color: var(--muted); }
 
-    .alert { margin-top: 20px; padding: 12px 14px; border-radius: 10px; font-size: .92rem; }
-    .alert-error { background: #fbe9e7; color: var(--danger); border: 1px solid #f1c3bd; }
-    .alert-success { background: #e6f2ea; color: #1d6b3a; border: 1px solid #bfdcc8; }
-    .alert ul { margin: 0; padding-left: 18px; }
-
     form { margin-top: 28px; display: grid; gap: 18px; }
     .field label, .legend { display: block; font-weight: 600; font-size: .92rem; margin-bottom: 6px; }
     .input-box { position: relative; }
@@ -176,6 +171,12 @@ $roles = [
     .btn:hover { background: var(--forest-2); }
     .btn:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
 
+    .alert {
+      margin-top: 22px; padding: 12px 14px; border-radius: 10px;
+      background: #fbe9e7; border: 1.5px solid #e8b4ae; color: var(--danger);
+      font-size: .92rem; font-weight: 500;
+    }
+    .alert ul { margin-left: 18px; }
     .login-link { margin-top: 24px; text-align: center; color: var(--muted); }
     .admin-note { margin-top: 14px; text-align: center; font-size: .8rem; color: var(--muted); }
 
@@ -234,24 +235,28 @@ $roles = [
         <p class="sub">It takes less than a minute.</p>
 
         <?php if ($errors): ?>
-          <div class="alert alert-error" role="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul></div>
+          <div class="alert" role="alert">
+            <ul>
+              <?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?>
+            </ul>
+          </div>
         <?php endif; ?>
 
         <form action="../Backend/register_process.php" method="post" novalidate>
 
           <div class="field">
             <label for="full_name">Full name</label>
-            <input type="text" id="full_name" name="full_name" value="<?= $old('full_name') ?>" placeholder="e.g. Amina Wanjiru" autocomplete="name" required>
+            <input type="text" id="full_name" name="full_name" placeholder="e.g. Amina Wanjiru" autocomplete="name" value="<?= htmlspecialchars($old['full_name']) ?>" required>
           </div>
 
           <div class="two-col">
             <div class="field">
               <label for="email">Email</label>
-              <input type="email" id="email" name="email" value="<?= $old('email') ?>" placeholder="you@example.com" autocomplete="email" required>
+              <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" value="<?= htmlspecialchars($old['email']) ?>" required>
             </div>
             <div class="field">
               <label for="phone">Phone number</label>
-              <input type="tel" id="phone" name="phone" value="<?= $old('phone') ?>" placeholder="0712 345 678" autocomplete="tel" required>
+              <input type="tel" id="phone" name="phone" placeholder="0712 345 678" autocomplete="tel" value="<?= htmlspecialchars($old['phone']) ?>" required>
             </div>
           </div>
 
@@ -276,7 +281,7 @@ $roles = [
             <div class="role-grid">
               <?php foreach ($roles as $value => [$label, $desc]): ?>
                 <label class="role">
-                  <input type="radio" name="role" value="<?= htmlspecialchars($value) ?>" <?= $old('role') === $value ? 'checked' : '' ?> required>
+                  <input type="radio" name="role" value="<?= htmlspecialchars($value) ?>" <?= $old['role'] === $value ? 'checked' : '' ?> required>
                   <span class="role-card">
                     <strong><?= htmlspecialchars($label) ?></strong>
                     <span><?= htmlspecialchars($desc) ?></span>

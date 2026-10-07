@@ -1,9 +1,9 @@
 <?php
 // Frontend/student-dashboard.php
 session_start();
-require_once __DIR__ . '/../Backend/auth.php';
-require_role('student');           // check login before touching the database
 require_once __DIR__ . '/../Backend/db.php';
+require_once __DIR__ . '/../Backend/auth.php';
+require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
 
