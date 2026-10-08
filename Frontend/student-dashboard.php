@@ -3,6 +3,7 @@
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
+require_once __DIR__ . '/../Backend/categories.php';
 require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
@@ -35,13 +36,30 @@ if ($wallet) {
     $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 }
+// Budget envelopes
+$categories = budget_categories();
+$alloc = [];
+$committed = 0.0;
+if ($wallet) {
+    $stmt = $conn->prepare('SELECT category, allocated, spent FROM budget_allocations WHERE wallet_id = ?');
+    $stmt->bind_param('i', $wallet['id']);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $alloc[$row['category']] = $row;
+        $committed += (float) $row['allocated'] - (float) $row['spent'];
+    }
+    $stmt->close();
+}
+$unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Student Dashboard | SponsorWallet</title>
+  
   <style>
     :root { --forest:#0f3d3a; --forest-2:#17524d; --paper:#f1f5f0; --ink:#1b2a29; --muted:#5d6f6c; --line:#cfdad6; --saffron:#f2b134; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -66,6 +84,14 @@ if ($wallet) {
     .table-wrap { overflow-x: auto; }
     .empty { color: var(--muted); }
     .badge { font-size: .75rem; padding: 2px 8px; border-radius: 99px; background: #fde7c0; color: var(--ink); margin-left: 6px; }
+    .bar { height: 8px; background: #e3ebe8; border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
+    .bar > span { display: block; height: 100%; background: var(--forest); }
+    .bar > span.high { background: #b3261e; }
+    .cat { padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .cat:last-of-type { border-bottom: 0; }
+    .cat-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .btn-link { display: inline-block; background: var(--forest); color: #fff; text-decoration: none; font-weight: 600; padding: 10px 16px; border-radius: 10px; }
+    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -92,6 +118,28 @@ if ($wallet) {
         <div class="sub">Sponsored by <?= htmlspecialchars($wallet['sponsor_name']) ?></div>
       </section>
 
+            <section class="card">
+        <div class="section-head">
+          <h2 style="margin:0">My budget</h2>
+          <a class="btn-link" href="student-budget.php">Plan my budget</a>
+        </div>
+        <p class="sub" style="margin-bottom:8px;">Not yet allocated: <strong>KES <?= number_format($unallocated, 2) ?></strong></p>
+        <?php foreach ($categories as $slug => $label):
+              $a = (float) ($alloc[$slug]['allocated'] ?? 0);
+              $sp = (float) ($alloc[$slug]['spent'] ?? 0);
+              $pct = $a > 0 ? min(100, $sp / $a * 100) : 0; ?>
+          <div class="cat">
+            <div class="cat-head">
+              <strong><?= htmlspecialchars($label) ?></strong>
+              <span>KES <?= number_format($a - $sp, 2) ?> left of <?= number_format($a, 2) ?></span>
+            </div>
+            <div class="bar" aria-hidden="true"><span class="<?= $pct >= 90 ? 'high' : '' ?>" style="width:<?= round($pct) ?>%"></span></div>
+          </div>
+        <?php endforeach; ?>
+        <?php if (!$alloc): ?>
+          <p class="empty" style="margin-top:10px;">You haven't split your money yet. Click "Plan my budget" to start.</p>
+        <?php endif; ?>
+      </section>
       <section class="card">
         <h2>Recent activity</h2>
         <?php if (!$transactions): ?>
