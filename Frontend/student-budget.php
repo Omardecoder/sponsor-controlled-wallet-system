@@ -108,7 +108,7 @@ $unallocated = $balance - $committed;
 
       <section class="card">
         <h2>Set aside money for each category</h2>
-        <form action="../Backend/save_budget.php" method="post" id="budget-form"
+        <form action="../Backend/submit_budget_proposal.php" method="post">
               data-balance="<?= htmlspecialchars((string) $balance) ?>">
           <?php foreach ($categories as $slug => $label):
                 $a = (float) ($alloc[$slug]['allocated'] ?? 0);
