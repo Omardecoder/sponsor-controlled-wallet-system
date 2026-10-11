@@ -207,3 +207,41 @@ tr:last-child td { border-bottom: 0; }
   .hero-side { text-align: left; }
   .card-head { flex-wrap: wrap; }
 }
+
+
+
+/* ---------- Budget proposals (sponsor review) ---------- */
+.proposal-body { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+.total-row td { font-weight: 700; color: var(--forest); }
+.money-box { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: var(--paper); border-radius: 10px; padding: 12px 14px; }
+.money-box span { display: block; font-size: .8rem; color: var(--muted); }
+.money-box b { font-size: 1.05rem; color: var(--forest); }
+.money-box .short b { color: #8a5a00; }
+textarea { resize: vertical; }
+.btn-outline { background: #fff; color: var(--forest); border: 1.5px solid var(--forest); }
+.btn-outline:hover { background: var(--green-bg); }
+@media (max-width: 1000px) {
+  .proposal-body { grid-template-columns: 1fr; }
+}
+
+
+
+/* ---------- Student budget page ---------- */
+.stats.stats-3 { grid-template-columns: repeat(3, 1fr); }
+.cat-list { display: grid; }
+.cat-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.cat-row:last-child { border-bottom: 0; }
+.cat-row label { margin-bottom: 2px; font-size: .95rem; }
+.money-input { display: flex; align-items: center; gap: 8px; width: 220px; flex: none; }
+.money-input span { color: var(--muted); font-size: .85rem; font-weight: 600; }
+.money-input input { text-align: right; }
+.money-input input:disabled { background: var(--paper); color: var(--muted); }
+.form-warn { color: var(--danger); font-size: .9rem; min-height: 1.3em; margin: 12px 0; }
+.warn-text { color: #8a5a00; }
+.btn:disabled { background: #9db3af; cursor: not-allowed; }
+@media (max-width: 1000px) { .stats.stats-3 { grid-template-columns: 1fr 1fr 1fr; } }
+@media (max-width: 640px) {
+  .stats.stats-3 { grid-template-columns: 1fr; }
+  .cat-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .money-input { width: 100%; }
+}

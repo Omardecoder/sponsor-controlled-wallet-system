@@ -1,6 +1,7 @@
 <?php
 // Frontend/sponsor-proposals.php
-// Sponsor: see budget proposals from students whose wallet you control.
+// Sponsor: review budget proposals from your students. Approve (and fund) or request changes.
+// Posts to ../Backend/review_budget_proposal.php.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
@@ -8,27 +9,38 @@ require_once __DIR__ . '/../Backend/categories.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
+
+$flash = $_SESSION['flash'] ?? null;
+unset($_SESSION['flash']);
+
 $labels = budget_categories();   // slug => label
 
-// The link: budget_proposals.wallet_id -> wallets.sponsor_id
-$stmt = $conn->prepare(
-    "SELECT p.id, p.status, p.created_at, w.balance,
-            u.full_name AS student_name, u.email, u.phone,
-            COALESCE(SUM(i.proposed_amount), 0) AS total
-     FROM budget_proposals p
-     JOIN wallets w ON w.id = p.wallet_id
-     JOIN users u   ON u.id = w.student_id
-     LEFT JOIN budget_proposal_items i ON i.proposal_id = p.id
-     WHERE w.sponsor_id = ? AND p.status = 'pending'
-     GROUP BY p.id
-     ORDER BY p.created_at ASC"
-);
-$stmt->bind_param('i', $sponsorId);
-$stmt->execute();
-$proposals = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$stmt->close();
+// Proposals on wallets this sponsor controls (budget_proposals.wallet_id -> wallets.sponsor_id)
+function load_proposals(mysqli $conn, int $sponsorId, bool $pending): array
+{
+    $sql = "SELECT p.id, p.status, p.created_at, p.reviewed_at, p.sponsor_feedback,
+                   w.balance, w.status AS wallet_status,
+                   u.full_name AS student_name, u.email, u.phone,
+                   COALESCE(SUM(i.proposed_amount), 0) AS total
+            FROM budget_proposals p
+            JOIN wallets w ON w.id = p.wallet_id
+            JOIN users u   ON u.id = w.student_id
+            LEFT JOIN budget_proposal_items i ON i.proposal_id = p.id
+            WHERE w.sponsor_id = ? AND " . ($pending ? "p.status = 'pending'" : "p.status <> 'pending'") . "
+            GROUP BY p.id
+            ORDER BY " . ($pending ? 'p.created_at ASC, p.id ASC' : 'p.reviewed_at DESC, p.id DESC LIMIT 10');
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param('i', $sponsorId);
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    return $rows;
+}
 
-// Category lines for each proposal
+$proposals = load_proposals($conn, $sponsorId, true);
+$reviewed  = load_proposals($conn, $sponsorId, false);
+
+// Category lines for each pending proposal
 $items = [];
 $stmt = $conn->prepare('SELECT category, proposed_amount FROM budget_proposal_items WHERE proposal_id = ? ORDER BY id');
 foreach ($proposals as $p) {
@@ -38,6 +50,18 @@ foreach ($proposals as $p) {
     $items[$pid] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 }
 $stmt->close();
+
+$nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
+$initials  = strtoupper(mb_substr($nameParts[0], 0, 1) . (count($nameParts) > 1 ? mb_substr(end($nameParts), 0, 1) : ''));
+
+function kes2($v): string { return number_format((float) $v, 2); }
+
+$statusPill = [
+    'approved'          => ['Approved', 'green'],
+    'changes_requested' => ['Changes requested', 'amber'],
+];
+
+$active = 'proposals';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -45,56 +69,135 @@ $stmt->close();
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Budget Proposals | SponsorWallet</title>
-  <style>
-    :root { --forest:#0f3d3a; --paper:#f1f5f0; --ink:#1b2a29; --muted:#5d6f6c; --line:#cfdad6; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: "Segoe UI", Arial, sans-serif; background: var(--paper); color: var(--ink); line-height: 1.5; }
-    header { background: var(--forest); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-    header a { color: #fff; font-weight: 600; }
-    main { max-width: 860px; margin: 0 auto; padding: 32px 20px; display: grid; gap: 20px; }
-    h1 { color: var(--forest); }
-    .card { background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 20px; }
-    .head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .muted { color: var(--muted); font-size: .9rem; }
-    .total { font-size: 1.4rem; font-weight: 700; color: var(--forest); }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
-    .num { text-align: right; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-  <header>
-    <strong>SponsorWallet</strong>
-    <span><a href="sponsor-dashboard.php">Dashboard</a> | <a href="../Backend/logout.php">Log out</a></span>
-  </header>
-  <main>
-    <h1>Budget proposals (<?= count($proposals) ?>)</h1>
+<div class="layout">
 
-    <?php if (!$proposals): ?>
-      <div class="card muted">No proposals waiting. When one of your students submits a budget, it appears here.</div>
-    <?php endif; ?>
+  <?php include __DIR__ . '/partials/sponsor-sidebar.php'; ?>
 
-    <?php foreach ($proposals as $p): $pid = (int) $p['id']; ?>
-      <div class="card">
-        <div class="head">
-          <div>
-            <strong><?= htmlspecialchars($p['student_name']) ?></strong>
-            <div class="muted"><?= htmlspecialchars($p['email']) ?> · sent <?= htmlspecialchars(date('j M Y, H:i', strtotime($p['created_at']))) ?></div>
+  <div class="content">
+    <header class="topbar">
+      <h1>Budget Proposals</h1>
+      <div class="topbar-right">
+        <div class="profile">
+          <div class="avatar" aria-hidden="true"><?= htmlspecialchars($initials) ?></div>
+          <div class="profile-text">
+            <div class="profile-name"><?= htmlspecialchars($_SESSION['full_name']) ?></div>
+            <div class="profile-role">Sponsor</div>
           </div>
-          <div class="total">KES <?= number_format((float) $p['total'], 2) ?></div>
         </div>
-        <table>
-          <tr><th>Category</th><th class="num">Amount (KES)</th></tr>
-          <?php foreach ($items[$pid] as $it): ?>
-            <tr>
-              <td><?= htmlspecialchars($labels[$it['category']] ?? $it['category']) ?></td>
-              <td class="num"><?= number_format((float) $it['proposed_amount'], 2) ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </table>
-        <p class="muted" style="margin-top:10px;">Wallet balance now: KES <?= number_format((float) $p['balance'], 2) ?></p>
       </div>
-    <?php endforeach; ?>
-  </main>
+    </header>
+
+    <main class="page">
+      <div class="page-head">
+        <div>
+          <h2>Waiting for your review (<?= count($proposals) ?>)</h2>
+          <p class="muted">Approve a student's plan and add the money it needs, or send it back with feedback.</p>
+        </div>
+      </div>
+
+      <?php if ($flash): ?>
+        <div class="alert <?= $flash['type'] === 'success' ? 'success' : 'error' ?>" role="status"><?= htmlspecialchars($flash['message']) ?></div>
+      <?php endif; ?>
+
+      <?php if (!$proposals): ?>
+        <section class="card"><p class="empty">No proposals waiting. When one of your students submits a budget, it appears here.</p></section>
+      <?php endif; ?>
+
+      <?php foreach ($proposals as $p):
+          $pid       = (int) $p['id'];
+          $total     = (float) $p['total'];
+          $balance   = (float) $p['balance'];
+          $shortfall = max(0, $total - $balance);
+          $frozen    = $p['wallet_status'] !== 'active';
+      ?>
+        <section class="card proposal">
+          <div class="card-head">
+            <div>
+              <h3><?= htmlspecialchars($p['student_name']) ?></h3>
+              <div class="muted small"><?= htmlspecialchars($p['email']) ?> · sent <?= htmlspecialchars(date('j M Y, H:i', strtotime($p['created_at']))) ?></div>
+            </div>
+            <div class="stat-value">KES <?= number_format($total, 0) ?></div>
+          </div>
+
+          <div class="proposal-body">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Category</th><th class="num">Amount (KES)</th></tr></thead>
+                <tbody>
+                  <?php foreach ($items[$pid] as $it): ?>
+                    <tr>
+                      <td><?= htmlspecialchars($labels[$it['category']] ?? $it['category']) ?></td>
+                      <td class="num"><?= kes2($it['proposed_amount']) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                  <tr class="total-row"><td>Total</td><td class="num"><?= kes2($total) ?></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <form action="../Backend/review_budget_proposal.php" method="post" class="form-grid">
+              <input type="hidden" name="proposal_id" value="<?= $pid ?>">
+
+              <div class="money-box">
+                <div><span>In the wallet now</span><b>KES <?= kes2($balance) ?></b></div>
+                <div class="<?= $shortfall > 0 ? 'short' : '' ?>"><span>Still needed</span><b>KES <?= kes2($shortfall) ?></b></div>
+              </div>
+
+              <div>
+                <label for="fund-<?= $pid ?>">Add to wallet when approving (KES)</label>
+                <input type="number" id="fund-<?= $pid ?>" name="fund_amount" min="0" step="0.01"
+                       value="<?= number_format($shortfall, 2, '.', '') ?>" <?= $frozen ? 'disabled' : '' ?>>
+                <p class="muted small" style="margin-top:4px;">
+                  <?= $frozen ? 'This wallet is frozen, so money can\'t be added.' : 'Pre-filled with what\'s still needed. Set 0 to approve without adding money.' ?>
+                </p>
+              </div>
+
+              <div>
+                <label for="feedback-<?= $pid ?>">Feedback for the student <span class="muted" style="font-weight:400;">(required for Request changes)</span></label>
+                <textarea id="feedback-<?= $pid ?>" name="feedback" rows="3" maxlength="1000" placeholder="e.g. Please reduce Entertainment and move it to Food."></textarea>
+              </div>
+
+              <div class="row">
+                <button type="submit" name="decision" value="approve" class="btn"
+                        onclick="return confirm('Approve this budget and add the amount shown to the wallet?');">Approve</button>
+                <button type="submit" name="decision" value="changes" class="btn btn-outline">Request changes</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      <?php endforeach; ?>
+
+      <section class="card">
+        <div class="card-head"><h3>Recently reviewed</h3></div>
+        <?php if (!$reviewed): ?>
+          <p class="empty">Nothing reviewed yet.</p>
+        <?php else: ?>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Student</th><th>Reviewed</th><th>Decision</th><th>Feedback</th><th class="num">Total (KES)</th></tr></thead>
+              <tbody>
+                <?php foreach ($reviewed as $r): [$label, $color] = $statusPill[$r['status']] ?? [ucfirst($r['status']), 'amber']; ?>
+                  <tr>
+                    <td><?= htmlspecialchars($r['student_name']) ?></td>
+                    <td><?= $r['reviewed_at'] ? htmlspecialchars(date('j M Y', strtotime($r['reviewed_at']))) : '' ?></td>
+                    <td><span class="pill <?= $color ?>"><?= $label ?></span></td>
+                    <td class="wrap muted"><?= htmlspecialchars($r['sponsor_feedback'] ?? '') ?></td>
+                    <td class="num"><?= kes2($r['total']) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </section>
+    </main>
+  </div>
+</div>
 </body>
 </html>
