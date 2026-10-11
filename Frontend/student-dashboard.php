@@ -1,5 +1,6 @@
 <?php
 // Frontend/student-dashboard.php
+// Student overview: balance, funds received, spending, approved budget, transactions.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
@@ -8,7 +9,10 @@ require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
 
-// This student's wallet and the sponsor who controls it
+$flash = $_SESSION['flash'] ?? null;
+unset($_SESSION['flash']);
+
+// ---- The student's wallet and the sponsor linked to it ----
 $stmt = $conn->prepare(
     'SELECT w.id, w.balance, w.status, s.full_name AS sponsor_name
      FROM wallets w
@@ -21,37 +25,85 @@ $stmt->execute();
 $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Last 10 transactions
-$transactions = [];
+$totals     = ['received' => 0, 'spent' => 0];
+$budgetRows = [];
+$proposal   = null;
+$recent     = [];
+
+// Which transactions to list: all, only funding, or only spending
+$txFilter = in_array($_GET['tx'] ?? '', ['funding', 'spending'], true) ? $_GET['tx'] : 'all';
+
 if ($wallet) {
+    $walletId = (int) $wallet['id'];
+
+    // Funds received and total spent
     $stmt = $conn->prepare(
-        'SELECT type, amount, balance_after, description, created_at
-         FROM transactions
-         WHERE wallet_id = ?
-         ORDER BY created_at DESC, id DESC
-         LIMIT 10'
+        "SELECT
+            COALESCE(SUM(CASE WHEN type = 'funding'  THEN amount END), 0) AS received,
+            COALESCE(SUM(CASE WHEN type = 'spending' THEN amount END), 0) AS spent
+         FROM transactions WHERE wallet_id = ?"
     );
-    $stmt->bind_param('i', $wallet['id']);
+    $stmt->bind_param('i', $walletId);
     $stmt->execute();
-    $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $totals = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    // Approved budget lines (filled in when the sponsor approves a proposal)
+    $stmt = $conn->prepare(
+        'SELECT category, allocated, spent
+         FROM budget_allocations
+         WHERE wallet_id = ?
+         ORDER BY allocated DESC'
+    );
+    $stmt->bind_param('i', $walletId);
+    $stmt->execute();
+    $budgetRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    // Latest budget proposal and the sponsor's decision
+    $stmt = $conn->prepare(
+        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at,
+                COALESCE(SUM(i.proposed_amount), 0) AS total
+         FROM budget_proposals p
+         LEFT JOIN budget_proposal_items i ON i.proposal_id = p.id
+         WHERE p.wallet_id = ?
+         GROUP BY p.id
+         ORDER BY p.id DESC
+         LIMIT 1'
+    );
+    $stmt->bind_param('i', $walletId);
+    $stmt->execute();
+    $proposal = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    // Recent transactions
+    $sql = 'SELECT type, amount, balance_after, description, created_at
+            FROM transactions WHERE wallet_id = ?'
+         . ($txFilter !== 'all' ? ' AND type = ?' : '')
+         . ' ORDER BY created_at DESC, id DESC LIMIT 15';
+    $stmt = $conn->prepare($sql);
+    if ($txFilter !== 'all') {
+        $stmt->bind_param('is', $walletId, $txFilter);
+    } else {
+        $stmt->bind_param('i', $walletId);
+    }
+    $stmt->execute();
+    $recent = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 }
 
-// Budget envelopes
-$categories = budget_categories();
-$alloc = [];
-$committed = 0.0;
-if ($wallet) {
-    $stmt = $conn->prepare('SELECT category, allocated, spent FROM budget_allocations WHERE wallet_id = ?');
-    $stmt->bind_param('i', $wallet['id']);
-    $stmt->execute();
-    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
-        $alloc[$row['category']] = $row;
-        $committed += (float) $row['allocated'] - (float) $row['spent'];
-    }
-    $stmt->close();
-}
-$unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
+$budgetTotal    = array_sum(array_column($budgetRows, 'allocated'));
+$categoryLabels = budget_categories();   // slug => label
+
+$nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
+$initials  = strtoupper(mb_substr($nameParts[0], 0, 1) . (count($nameParts) > 1 ? mb_substr(end($nameParts), 0, 1) : ''));
+$firstName = $nameParts[0];
+
+function ksh($v): string { return 'KSh ' . number_format((float) $v, 0); }
+function ksh2($v): string { return number_format((float) $v, 2); }
+
+$active = $txFilter === 'spending' ? 'spending' : ($txFilter === 'funding' ? 'funding' : 'dashboard');
+$txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spending' => 'Spending history'][$txFilter];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -59,115 +111,188 @@ $unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Student Dashboard | SponsorWallet</title>
-  <style>
-    :root { --forest:#0f3d3a; --forest-2:#17524d; --paper:#f1f5f0; --ink:#1b2a29; --muted:#5d6f6c; --line:#cfdad6; --saffron:#f2b134; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: "Segoe UI", Arial, sans-serif; background: var(--paper); color: var(--ink); line-height: 1.5; }
-    header { background: var(--forest); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
-    header strong { font-size: 1.15rem; }
-    header a { color: #fff; font-weight: 600; }
-    main { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; display: grid; gap: 24px; }
-    h1 { color: var(--forest); font-size: 1.6rem; }
-    h2 { color: var(--forest); font-size: 1.15rem; margin-bottom: 12px; }
-    .sub { color: var(--muted); }
-    .card { background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 22px; }
-    .balance-card { background: var(--forest); color: #fff; border: 0; }
-    .balance-card .sub { color: #a9c4bf; }
-    .big { font-size: 2.4rem; font-weight: 700; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: .92rem; }
-    th { color: var(--muted); font-weight: 600; }
-    td.num, th.num { text-align: right; }
-    .in { color: #1d6b3a; font-weight: 600; }
-    .out { color: #b3261e; font-weight: 600; }
-    .table-wrap { overflow-x: auto; }
-    .empty { color: var(--muted); }
-    .badge { font-size: .75rem; padding: 2px 8px; border-radius: 99px; background: #fde7c0; color: var(--ink); margin-left: 6px; }
-    .bar { height: 8px; background: #e3ebe8; border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
-    .bar > span { display: block; height: 100%; background: var(--forest); }
-    .bar > span.high { background: #b3261e; }
-    .cat { padding: 12px 0; border-bottom: 1px solid var(--line); }
-    .cat:last-of-type { border-bottom: 0; }
-    .cat-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .btn-link { display: inline-block; background: var(--forest); color: #fff; text-decoration: none; font-weight: 600; padding: 10px 16px; border-radius: 10px; }
-    .btn-link:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
-    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-  <header>
-    <strong>SponsorWallet</strong>
-    <span>Hello, <?= htmlspecialchars($_SESSION['full_name']) ?> &nbsp;|&nbsp; <a href="../Backend/logout.php">Log out</a></span>
-  </header>
+<div class="layout">
 
-  <main>
-    <h1>Student dashboard</h1>
+  <?php include __DIR__ . '/partials/student-sidebar.php'; ?>
 
-    <?php if (!$wallet): ?>
-      <section class="card">
-        <h2>No wallet yet</h2>
-        <p class="empty">Your sponsor needs to create a wallet for you. Give them the email or phone number you registered with.</p>
+  <div class="content">
+    <header class="topbar">
+      <h1>Student Dashboard</h1>
+      <div class="topbar-right">
+        <div class="profile">
+          <div class="avatar" aria-hidden="true"><?= htmlspecialchars($initials) ?></div>
+          <div class="profile-text">
+            <div class="profile-name"><?= htmlspecialchars($_SESSION['full_name']) ?></div>
+            <div class="profile-role">Student</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      <!-- Welcome band -->
+      <section class="hero">
+        <div>
+          <div class="hero-kicker">Student dashboard</div>
+          <h2>Welcome back, <?= htmlspecialchars($firstName) ?>!</h2>
+          <p>Manage your funds and stay on top of your budget.</p>
+        </div>
+        <?php if ($wallet): ?>
+          <div class="hero-side">
+            <span>Sponsored by</span>
+            <strong><?= htmlspecialchars($wallet['sponsor_name']) ?></strong>
+            <?php if ($wallet['status'] !== 'active'): ?><span class="pill red">Wallet frozen</span><?php endif; ?>
+          </div>
+        <?php endif; ?>
       </section>
 
-    <?php else: ?>
-      <section class="card balance-card">
-        <div class="sub">Wallet balance
-          <?php if ($wallet['status'] !== 'active'): ?><span class="badge"><?= htmlspecialchars($wallet['status']) ?></span><?php endif; ?>
-        </div>
-        <div class="big">KES <?= number_format((float) $wallet['balance'], 2) ?></div>
-        <div class="sub">Sponsored by <?= htmlspecialchars($wallet['sponsor_name']) ?></div>
-      </section>
+      <?php if ($flash): ?>
+        <div class="alert <?= $flash['type'] === 'success' ? 'success' : 'error' ?>" role="status"><?= htmlspecialchars($flash['message']) ?></div>
+      <?php endif; ?>
 
-      <section class="card">
-        <div class="section-head">
-          <h2 style="margin:0">My budget</h2>
-          <a class="btn-link" href="student-budget.php">Plan my budget</a>
-        </div>
-        <p class="sub" style="margin-bottom:8px;">Not yet allocated: <strong>KES <?= number_format($unallocated, 2) ?></strong></p>
-        <?php foreach ($categories as $slug => $label):
-              $a = (float) ($alloc[$slug]['allocated'] ?? 0);
-              $sp = (float) ($alloc[$slug]['spent'] ?? 0);
-              $pct = $a > 0 ? min(100, $sp / $a * 100) : 0; ?>
-          <div class="cat">
-            <div class="cat-head">
-              <strong><?= htmlspecialchars($label) ?></strong>
-              <span>KES <?= number_format($a - $sp, 2) ?> left of <?= number_format($a, 2) ?></span>
+      <?php if (!$wallet): ?>
+        <section class="card">
+          <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
+          <p class="muted">Ask your sponsor to add you from their dashboard using the email or phone number you registered with. Once they do, your wallet and budget tools appear here.</p>
+        </section>
+
+      <?php else: ?>
+
+        <?php // Status of the latest budget proposal ?>
+        <?php if ($proposal && $proposal['status'] === 'pending'): ?>
+          <div class="notice">
+            <span>Your budget proposal of <strong><?= ksh($proposal['total']) ?></strong> is waiting for <?= htmlspecialchars($wallet['sponsor_name']) ?> to approve it.</span>
+            <a class="btn btn-accent" href="student-budget.php">View</a>
+          </div>
+        <?php elseif ($proposal && $proposal['status'] === 'changes_requested'): ?>
+          <div class="notice">
+            <span>
+              <strong><?= htmlspecialchars($wallet['sponsor_name']) ?> asked for changes to your budget.</strong>
+              <?php if ($proposal['sponsor_feedback']): ?><br><span class="muted">“<?= htmlspecialchars($proposal['sponsor_feedback']) ?>”</span><?php endif; ?>
+            </span>
+            <a class="btn btn-accent" href="student-budget.php">Update budget</a>
+          </div>
+        <?php endif; ?>
+
+        <!-- Four summary cards -->
+        <section class="stats" aria-label="Summary">
+          <div class="card stat">
+            <div class="stat-icon"><?= sw_icon('wallet') ?></div>
+            <div class="stat-label">Available Balance</div>
+            <div class="stat-value"><?= ksh($wallet['balance']) ?></div>
+          </div>
+          <div class="card stat">
+            <div class="stat-icon"><?= sw_icon('trending') ?></div>
+            <div class="stat-label">Total Spent</div>
+            <div class="stat-value"><?= ksh($totals['spent']) ?></div>
+          </div>
+          <div class="card stat">
+            <div class="stat-icon"><?= sw_icon('piggy') ?></div>
+            <div class="stat-label">Approved Budget</div>
+            <div class="stat-value"><?= $budgetRows ? ksh($budgetTotal) : '—' ?></div>
+            <?php if (!$budgetRows): ?><div class="stat-note">No approved budget yet</div><?php endif; ?>
+          </div>
+          <div class="card stat">
+            <div class="stat-icon"><?= sw_icon('received') ?></div>
+            <div class="stat-label">Funds Received</div>
+            <div class="stat-value"><?= ksh($totals['received']) ?></div>
+          </div>
+        </section>
+
+        <div class="grid-2">
+          <!-- My budget -->
+          <section class="card">
+            <div class="card-head">
+              <h3>My budget</h3>
+              <a href="student-budget.php">Manage</a>
             </div>
-            <div class="bar" aria-hidden="true"><span class="<?= $pct >= 90 ? 'high' : '' ?>" style="width:<?= round($pct) ?>%"></span></div>
-          </div>
-        <?php endforeach; ?>
-        <?php if (!$alloc): ?>
-          <p class="empty" style="margin-top:10px;">You haven't split your money yet. Click "Plan my budget" to set aside amounts for tuition, rent, food and more.</p>
-        <?php endif; ?>
-      </section>
+            <?php if (!$budgetRows): ?>
+              <p class="empty">
+                <?php if ($proposal && $proposal['status'] === 'pending'): ?>
+                  Your budget lines will appear here once your sponsor approves your proposal.
+                <?php else: ?>
+                  You don't have an approved budget yet. Create one and send it to your sponsor.
+                <?php endif; ?>
+              </p>
+            <?php else: ?>
+              <div class="bars">
+                <?php foreach ($budgetRows as $b):
+                    $alloc = (float) $b['allocated'];
+                    $spent = (float) $b['spent'];
+                    $pct   = $alloc > 0 ? round($spent / $alloc * 100) : 0;
+                    $class = $pct > 100 ? 'over' : ($pct >= 80 ? 'high' : '');
+                ?>
+                  <div>
+                    <div class="bar-top">
+                      <b><?= htmlspecialchars($categoryLabels[$b['category']] ?? $b['category']) ?></b>
+                      <span><?= ksh($alloc - $spent) ?> left</span>
+                    </div>
+                    <div class="bar-track" role="img" aria-label="<?= $pct ?>% used">
+                      <div class="bar-fill <?= $class ?>" style="width: <?= min(100, $pct) ?>%"></div>
+                    </div>
+                    <div class="bar-sub"><?= ksh($spent) ?> spent of <?= ksh($alloc) ?> (<?= $pct ?>%)</div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
+          </section>
 
-      <section class="card">
-        <h2>Recent activity</h2>
-        <?php if (!$transactions): ?>
-          <p class="empty">No transactions yet. Funds your sponsor adds will show up here.</p>
-        <?php else: ?>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Date</th><th>Details</th><th class="num">Amount</th><th class="num">Balance</th></tr>
-              </thead>
-              <tbody>
-              <?php foreach ($transactions as $t): ?>
-                <tr>
-                  <td><?= htmlspecialchars(date('d M Y, H:i', strtotime($t['created_at']))) ?></td>
-                  <td><?= htmlspecialchars($t['description'] ?? '') ?></td>
-                  <td class="num <?= $t['type'] === 'funding' ? 'in' : 'out' ?>">
-                    <?= $t['type'] === 'funding' ? '+' : '-' ?><?= number_format((float) $t['amount'], 2) ?>
-                  </td>
-                  <td class="num"><?= number_format((float) $t['balance_after'], 2) ?></td>
-                </tr>
-              <?php endforeach; ?>
-              </tbody>
-            </table>
+          <!-- Quick actions -->
+          <section class="card">
+            <div class="card-head"><h3>Quick actions</h3></div>
+            <div class="actions-grid">
+              <a class="action" href="student-budget.php"><?= sw_icon('piggy') ?>Create Budget</a>
+              <a class="action" href="student-dashboard.php?tx=spending#transactions"><?= sw_icon('receipt') ?>Spending History</a>
+              <a class="action" href="student-dashboard.php?tx=funding#transactions"><?= sw_icon('history') ?>Funding History</a>
+              <span class="action disabled" title="Coming soon"><?= sw_icon('pen') ?>Record Spending<small>Soon</small></span>
+            </div>
+          </section>
+        </div>
+
+        <!-- Transactions -->
+        <section class="card" id="transactions">
+          <div class="card-head">
+            <h3><?= $txTitle ?></h3>
+            <div class="tabs" role="tablist" aria-label="Filter transactions">
+              <a href="student-dashboard.php#transactions" class="<?= $txFilter === 'all' ? 'on' : '' ?>">All</a>
+              <a href="student-dashboard.php?tx=funding#transactions" class="<?= $txFilter === 'funding' ? 'on' : '' ?>">Funding</a>
+              <a href="student-dashboard.php?tx=spending#transactions" class="<?= $txFilter === 'spending' ? 'on' : '' ?>">Spending</a>
+            </div>
           </div>
-        <?php endif; ?>
-      </section>
-    <?php endif; ?>
-  </main>
+          <?php if (!$recent): ?>
+            <p class="empty">
+              <?= $txFilter === 'spending' ? 'No spending recorded yet.' : ($txFilter === 'funding' ? 'No funds received yet.' : 'No transactions yet. Funds your sponsor sends will appear here.') ?>
+            </p>
+          <?php else: ?>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Date</th><th>Details</th><th>Type</th><th class="num">Amount (KSh)</th><th class="num">Balance (KSh)</th></tr>
+                </thead>
+                <tbody>
+                  <?php foreach ($recent as $t): $in = $t['type'] === 'funding'; ?>
+                    <tr>
+                      <td><?= htmlspecialchars(date('j M Y, H:i', strtotime($t['created_at']))) ?></td>
+                      <td class="wrap"><?= htmlspecialchars($t['description'] ?? '') ?></td>
+                      <td><span class="pill <?= $in ? 'green' : 'amber' ?>"><?= $in ? 'Received' : 'Spent' ?></span></td>
+                      <td class="num <?= $in ? 'amount-in' : 'amount-out' ?>"><?= $in ? '+' : '−' ?><?= ksh2($t['amount']) ?></td>
+                      <td class="num"><?= ksh2($t['balance_after']) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </section>
+      <?php endif; ?>
+    </main>
+  </div>
+</div>
 </body>
 </html>
