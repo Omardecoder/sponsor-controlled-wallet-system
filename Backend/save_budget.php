@@ -1,5 +1,8 @@
 <?php
 // Backend/save_budget.php
+// A student splits their wallet balance into category envelopes.
+// Rule: money still set aside in categories (allocated - spent) can never exceed the wallet balance.
+
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
@@ -29,7 +32,7 @@ if (!is_array($input)) {
     back('error', 'Invalid form data.');
 }
 
-// Validate every amount (blank = 0)
+// ---- Validate every amount (blank = 0) ----
 $newCents = [];
 foreach ($categories as $slug => $label) {
     $raw = str_replace(',', '', trim((string) ($input[$slug] ?? '')));
@@ -43,6 +46,7 @@ foreach ($categories as $slug => $label) {
 try {
     $conn->begin_transaction();
 
+    // Lock this student's wallet
     $stmt = $conn->prepare('SELECT id, balance, status FROM wallets WHERE student_id = ? FOR UPDATE');
     $stmt->bind_param('i', $studentId);
     $stmt->execute();
@@ -59,7 +63,7 @@ try {
     }
     $walletId = (int) $wallet['id'];
 
-    // How much is already spent in each category
+    // Existing envelopes (to know how much is already spent in each)
     $spentCents = [];
     $stmt = $conn->prepare('SELECT category, spent FROM budget_allocations WHERE wallet_id = ? FOR UPDATE');
     $stmt->bind_param('i', $walletId);
@@ -70,7 +74,7 @@ try {
     }
     $stmt->close();
 
-    // A category can't go below what is already spent from it
+    // A category can't be set lower than what is already spent from it
     $committed = 0;
     foreach ($categories as $slug => $label) {
         $spent = $spentCents[$slug] ?? 0;
@@ -81,14 +85,13 @@ try {
         $committed += $newCents[$slug] - $spent;
     }
 
-    // Money set aside can't exceed the wallet balance
     $balance = to_cents($wallet['balance']);
     if ($committed > $balance) {
         $conn->rollback();
         back('error', 'You allocated ' . number_format($committed / 100, 2) . ' but your wallet only has ' . number_format($balance / 100, 2) . ' available. Reduce some categories.');
     }
 
-    // Save each category (insert or update)
+    // Save (insert or update each category)
     $stmt = $conn->prepare(
         'INSERT INTO budget_allocations (wallet_id, category, allocated) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE allocated = VALUES(allocated)'

@@ -1,5 +1,6 @@
 <?php
 // Frontend/student-budget.php
+// The student splits their wallet balance into category envelopes.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
@@ -43,6 +44,7 @@ $unallocated = $balance - $committed;
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Segoe UI", Arial, sans-serif; background: var(--paper); color: var(--ink); line-height: 1.5; }
     header { background: var(--forest); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header strong { font-size: 1.15rem; }
     header a { color: #fff; font-weight: 600; }
     main { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; display: grid; gap: 22px; }
     h1 { color: var(--forest); font-size: 1.6rem; }
@@ -63,6 +65,7 @@ $unallocated = $balance - $committed;
     button { font: inherit; font-weight: 600; background: var(--forest); color: #fff; border: 0; border-radius: 10px; padding: 13px 18px; cursor: pointer; width: 100%; }
     button:hover { background: var(--forest-2); }
     button:disabled { background: #9db3af; cursor: not-allowed; }
+    button:focus-visible, a:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
     .warn { color: var(--danger); font-size: .9rem; margin: 6px 0 12px; min-height: 1.2em; }
     a { color: var(--forest); font-weight: 600; }
   </style>
@@ -132,6 +135,7 @@ $unallocated = $balance - $committed;
   </main>
 
   <script>
+    // Live "not yet allocated" figure. The server checks it again when you save.
     const form = document.getElementById('budget-form');
     if (form) {
       const balance = parseFloat(form.dataset.balance) || 0;

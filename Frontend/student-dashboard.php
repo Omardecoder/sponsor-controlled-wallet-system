@@ -36,6 +36,7 @@ if ($wallet) {
     $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 }
+
 // Budget envelopes
 $categories = budget_categories();
 $alloc = [];
@@ -52,14 +53,12 @@ if ($wallet) {
 }
 $unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Student Dashboard | SponsorWallet</title>
-  
   <style>
     :root { --forest:#0f3d3a; --forest-2:#17524d; --paper:#f1f5f0; --ink:#1b2a29; --muted:#5d6f6c; --line:#cfdad6; --saffron:#f2b134; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -91,6 +90,7 @@ $unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
     .cat:last-of-type { border-bottom: 0; }
     .cat-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .btn-link { display: inline-block; background: var(--forest); color: #fff; text-decoration: none; font-weight: 600; padding: 10px 16px; border-radius: 10px; }
+    .btn-link:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
     .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   </style>
 </head>
@@ -118,7 +118,7 @@ $unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
         <div class="sub">Sponsored by <?= htmlspecialchars($wallet['sponsor_name']) ?></div>
       </section>
 
-            <section class="card">
+      <section class="card">
         <div class="section-head">
           <h2 style="margin:0">My budget</h2>
           <a class="btn-link" href="student-budget.php">Plan my budget</a>
@@ -137,9 +137,10 @@ $unallocated = $wallet ? (float) $wallet['balance'] - $committed : 0.0;
           </div>
         <?php endforeach; ?>
         <?php if (!$alloc): ?>
-          <p class="empty" style="margin-top:10px;">You haven't split your money yet. Click "Plan my budget" to start.</p>
+          <p class="empty" style="margin-top:10px;">You haven't split your money yet. Click "Plan my budget" to set aside amounts for tuition, rent, food and more.</p>
         <?php endif; ?>
       </section>
+
       <section class="card">
         <h2>Recent activity</h2>
         <?php if (!$transactions): ?>
