@@ -245,3 +245,26 @@ textarea { resize: vertical; }
   .cat-row { flex-direction: column; align-items: stretch; gap: 8px; }
   .money-input { width: 100%; }
 }
+
+
+
+/* ---------- Record spending ---------- */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dropzone {
+  position: relative; display: grid; justify-items: center; gap: 4px; text-align: center;
+  padding: 22px 16px; border: 1.5px dashed #b9c8c3; border-radius: 12px; background: var(--paper);
+  color: var(--forest); cursor: pointer; font-weight: 400; margin: 0;
+}
+.dropzone:hover, .dropzone:focus-within { border-color: var(--forest); background: var(--green-bg); }
+.dropzone svg.icon { width: 26px; height: 26px; }
+.dropzone strong { font-size: .95rem; }
+.dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.pill.grey { background: #e8ecea; color: #4a5654; }
+a.pill { text-decoration: none; }
+a.pill:hover { text-decoration: underline; }
+.inline-filter select { width: auto; padding: 7px 10px; font-size: .88rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 480px) { .two-col { grid-template-columns: 1fr; } }
+.action-accent { background: var(--saffron); color: var(--forest); }
+.action-accent:hover { background: #e8a51f; }
+input[type=date] { width: 100%; font: inherit; color: var(--ink); background: #fff; padding: 10px 12px; border: 1.5px solid #cfdad6; border-radius: 10px; }

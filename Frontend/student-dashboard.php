@@ -248,9 +248,9 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
             <div class="card-head"><h3>Quick actions</h3></div>
             <div class="actions-grid">
               <a class="action" href="student-budget.php"><?= sw_icon('piggy') ?>Create Budget</a>
-              <a class="action" href="student-dashboard.php?tx=spending#transactions"><?= sw_icon('receipt') ?>Spending History</a>
+              <a class="action" href="record-spending.php#history"><?= sw_icon('receipt') ?>Spending History</a>
               <a class="action" href="student-dashboard.php?tx=funding#transactions"><?= sw_icon('history') ?>Funding History</a>
-              <span class="action disabled" title="Coming soon"><?= sw_icon('pen') ?>Record Spending<small>Soon</small></span>
+                            <a class="action action-accent" href="record-spending.php"><?= sw_icon('pen') ?>Record Spending</a>
             </div>
           </section>
         </div>

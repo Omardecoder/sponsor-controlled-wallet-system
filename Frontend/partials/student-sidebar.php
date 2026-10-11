@@ -13,8 +13,8 @@ $active = $active ?? '';
 $sidebarLinks = [
     ['dashboard', 'Dashboard',        'student-dashboard.php',                        'dashboard'],
     ['budget',    'My Budget',        'student-budget.php',                           'piggy'],
-    ['record',    'Record Spending',  null,                                           'pen'],
-    ['spending',  'Spending History', 'student-dashboard.php?tx=spending#transactions', 'receipt'],
+    ['record',    'Record Spending',  'record-spending.php',                          'pen'],
+    ['spending',  'Spending History', 'record-spending.php#history',                  'receipt'],
     ['funding',   'Funding History',  'student-dashboard.php?tx=funding#transactions',  'history'],
 ];
 ?>
