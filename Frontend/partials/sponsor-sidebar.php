@@ -54,7 +54,7 @@ $sidebarLinks = [
     ['send',      'Send Funds',       'sponsor-dashboard.php#send-funds',   'send'],
     ['proposals', 'Budget Proposals', 'sponsor-proposals.php',              'proposals'],
     ['funding',   'Funding History',  'sponsor-dashboard.php#transactions', 'history'],
-    ['spending',  'Spending History', null,                                 'receipt'],
+    ['spending',  'Spending History', sponsor-spending.php,                                 'receipt'],
     ['reports',   'Reports',          null,                                 'reports'],
 ];
 ?>

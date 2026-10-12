@@ -67,7 +67,7 @@ $initials  = strtoupper(mb_substr($nameParts[0], 0, 1) . (count($nameParts) > 1 
 function ksh($v): string { return 'KSh ' . number_format((float) $v, 2); }
 function ksh0($v): string { return 'KSh ' . number_format((float) $v, 0); }
 
-$active = 'record';
+$active = (($_GET['view'] ?? '') === 'history') ? 'spending' : 'record';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -210,6 +210,7 @@ $active = 'record';
           <div class="card-head">
             <h3>Spending history</h3>
             <form method="get" action="record-spending.php#history" class="inline-filter">
+            <input type="hidden" name="view" value="history">
               <label for="cat" class="sr-only">Filter by budget line</label>
               <select id="cat" name="cat" onchange="this.form.submit()">
                 <option value="">All budget lines</option>
