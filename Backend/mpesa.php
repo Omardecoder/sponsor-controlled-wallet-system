@@ -96,3 +96,26 @@ function mpesa_stk_push(string $phone254, int $amount, string $reference, string
     }
     return $json;
 }
+
+
+/**
+ * Asks Daraja for the status of an STK Push (used when the callback is late).
+ * Returns Daraja's reply. ResultCode "0" = paid, "1032" = cancelled, "1037" = no response, "1" = not enough money, "2001" = wrong PIN.
+ * While the customer hasn't answered yet, Daraja replies with an error ("The transaction is being processed").
+ */
+function mpesa_stk_query(string $checkoutRequestId): array
+{
+    $timestamp = date('YmdHis');
+    [$status, $json] = mpesa_http(
+        'POST',
+        mpesa_base_url() . '/mpesa/stkpushquery/v1/query',
+        ['Authorization: Bearer ' . mpesa_token(), 'Content-Type: application/json'],
+        [
+            'BusinessShortCode' => MPESA_SHORTCODE,
+            'Password'          => base64_encode(MPESA_SHORTCODE . MPESA_PASSKEY . $timestamp),
+            'Timestamp'         => $timestamp,
+            'CheckoutRequestID' => $checkoutRequestId,
+        ]
+    );
+    return is_array($json) ? $json : [];
+}

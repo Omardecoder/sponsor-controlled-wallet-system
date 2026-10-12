@@ -71,6 +71,13 @@ $stmt->execute();
 $recent = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+// The sponsor's own phone, used as the default M-Pesa number
+$stmt = $conn->prepare('SELECT phone FROM users WHERE id = ?');
+$stmt->bind_param('i', $sponsorId);
+$stmt->execute();
+$sponsorPhone = (string) ($stmt->get_result()->fetch_assoc()['phone'] ?? '');
+$stmt->close();
+
 // Initials for the profile circle, e.g. "Amina Wanjiru" -> "AW"
 $nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
 $initials = strtoupper(mb_substr($nameParts[0], 0, 1) . (count($nameParts) > 1 ? mb_substr(end($nameParts), 0, 1) : ''));
@@ -194,11 +201,11 @@ $active = 'dashboard';
 
         <!-- Send funds -->
         <section class="card" id="send-funds">
-          <div class="card-head"><h3>Send funds</h3></div>
+                    <div class="card-head"><h3>Send funds</h3><span class="mpesa-tag">M-PESA</span></div>
           <?php if (!$wallets): ?>
             <p class="empty">Add a student below before sending funds.</p>
           <?php else: ?>
-            <form action="../Backend/fund_wallet.php" method="post" class="form-grid">
+                        <form action="../Backend/mpesa_fund.php" method="post" class="form-grid">
               <div>
                 <label for="wallet_id">Student</label>
                 <select id="wallet_id" name="wallet_id" required>
@@ -214,10 +221,15 @@ $active = 'dashboard';
                 <input type="number" id="amount" name="amount" min="1" step="0.01" placeholder="e.g. 5000" required>
               </div>
               <div>
-                <label for="note">Note (optional)</label>
-                <input type="text" id="note" name="note" maxlength="255" placeholder="e.g. Term 2 upkeep">
+                <label for="amount">Amount (KES)</label>
+                <input type="number" id="amount" name="amount" min="1" max="250000" step="1" placeholder="e.g. 5000" required>
               </div>
-              <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Send Funds</button>
+              <div>
+                <label for="phone">Pay from M-Pesa number</label>
+                <input type="tel" id="phone" name="phone" required placeholder="0712 345 678" value="<?= htmlspecialchars($sponsorPhone) ?>">
+              </div>
+                            <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Pay with M-Pesa</button>
+              <p class="muted small">You'll get an M-Pesa prompt on this phone. The wallet is credited only after M-Pesa confirms the payment.</p>
             </form>
           <?php endif; ?>
         </section>

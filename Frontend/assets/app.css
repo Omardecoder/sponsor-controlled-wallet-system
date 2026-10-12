@@ -268,3 +268,21 @@ a.pill:hover { text-decoration: underline; }
 .action-accent { background: var(--saffron); color: var(--forest); }
 .action-accent:hover { background: #e8a51f; }
 input[type=date] { width: 100%; font: inherit; color: var(--ink); background: #fff; padding: 10px 12px; border: 1.5px solid #cfdad6; border-radius: 10px; }
+
+
+
+
+
+
+/* ---------- M-Pesa payment ---------- */
+.pay-card { max-width: 560px; width: 100%; justify-self: center; text-align: center; padding: 36px 28px; }
+.pay-state { display: grid; gap: 10px; justify-items: center; }
+.pay-state[hidden] { display: none; }
+.pay-state h2 { font-family: var(--display); color: var(--forest); font-size: 1.5rem; }
+.spinner { width: 54px; height: 54px; border-radius: 50%; border: 5px solid var(--green-bg); border-top-color: var(--green); animation: spin 1s linear infinite; margin-bottom: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.pay-icon { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; font-size: 1.8rem; font-weight: 700; margin-bottom: 6px; }
+.pay-icon.ok { background: var(--green-bg); color: var(--green); }
+.pay-icon.bad { background: var(--danger-bg); color: var(--danger); }
+.mpesa-tag { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; color: #fff; background: #3aa935; padding: 2px 9px; border-radius: 99px; }
