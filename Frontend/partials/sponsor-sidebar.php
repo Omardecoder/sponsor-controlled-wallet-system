@@ -3,7 +3,7 @@
 // The sponsor sidebar, shared by every sponsor page.
 //
 // Before including it, a page sets which link is highlighted:
-//     $active = 'dashboard';   // or 'students', 'send', 'proposals', 'funding'
+//     $active = 'dashboard';   // or 'students', 'send', 'proposals', 'funding', 'spending'
 //
 // It also sets $pendingCount (proposals waiting for this sponsor)
 // and the sw_icon() function, so the page can use both after the include.
@@ -54,7 +54,7 @@ $sidebarLinks = [
     ['send',      'Send Funds',       'sponsor-dashboard.php#send-funds',   'send'],
     ['proposals', 'Budget Proposals', 'sponsor-proposals.php',              'proposals'],
     ['funding',   'Funding History',  'sponsor-dashboard.php#transactions', 'history'],
-    ['spending',  'Spending History', sponsor-spending.php,                                 'receipt'],
+    ['spending',  'Spending History', 'sponsor-spending.php',               'receipt'],
     ['reports',   'Reports',          null,                                 'reports'],
 ];
 ?>
