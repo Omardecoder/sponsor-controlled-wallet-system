@@ -1,13 +1,12 @@
 <?php
 // Backend/mpesa_fund.php
-// A sponsor funds a student's wallet with M-Pesa (STK Push).
-// This only STARTS the payment: a prompt goes to the sponsor's phone.
-// The wallet is credited later, in mpesa_callback.php, and only if Safaricom confirms the payment.
+// A sponsor funds a student's wallet with M-Pesa (STK Push) from the dashboard's Send Funds form.
+// This only STARTS the payment. The wallet is credited by mpesa_callback.php when Safaricom confirms.
 
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/mpesa.php';
+require_once __DIR__ . '/mpesa_funding.php';
 require_role('sponsor');
 
 function back(string $type, string $message): void
@@ -43,53 +42,24 @@ if (mb_strlen($note) > 255) {
 }
 
 // The wallet must be this sponsor's and active
-$stmt = $conn->prepare(
-    'SELECT w.id, w.status, u.full_name FROM wallets w JOIN users u ON u.id = w.student_id
-     WHERE w.id = ? AND w.sponsor_id = ?'
-);
+$stmt = $conn->prepare('SELECT id, status FROM wallets WHERE id = ? AND sponsor_id = ?');
 $stmt->bind_param('ii', $walletId, $sponsorId);
 $stmt->execute();
 $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 if (!$wallet) {
-    back('error', 'That wallet was not found.');
+    back('error', 'Choose a student to fund.');
 }
 if ($wallet['status'] !== 'active') {
     back('error', 'This wallet is frozen and cannot be funded.');
 }
 
-// 1. Save the payment as "pending" before asking Safaricom
-$noteValue = $note !== '' ? $note : null;
-$amountStr = number_format($amount, 2, '.', '');
-$stmt = $conn->prepare(
-    'INSERT INTO mpesa_payments (wallet_id, sponsor_id, amount, phone, note) VALUES (?, ?, ?, ?, ?)'
-);
-$stmt->bind_param('iisss', $walletId, $sponsorId, $amountStr, $phone, $noteValue);
-$stmt->execute();
-$paymentId = (int) $conn->insert_id;
-$stmt->close();
-
-// 2. Send the prompt to the phone
 try {
-    $reply = mpesa_stk_push($phone, $amount, 'SW' . $walletId, 'Wallet fund');
+    $paymentId = mpesa_start_funding($conn, $sponsorId, $walletId, $amount, $phone, $note !== '' ? $note : null);
 } catch (Throwable $e) {
-    $msg = mb_substr($e->getMessage(), 0, 255);
-    $stmt = $conn->prepare("UPDATE mpesa_payments SET status = 'failed', result_desc = ?, updated_at = NOW() WHERE id = ?");
-    $stmt->bind_param('si', $msg, $paymentId);
-    $stmt->execute();
-    $stmt->close();
-    error_log('STK push failed: ' . $e->getMessage());
     back('error', 'Could not start the M-Pesa payment: ' . $e->getMessage());
 }
-
-// 3. Remember Safaricom's reference so the callback can find this payment
-$stmt = $conn->prepare(
-    'UPDATE mpesa_payments SET merchant_request_id = ?, checkout_request_id = ?, updated_at = NOW() WHERE id = ?'
-);
-$stmt->bind_param('ssi', $reply['MerchantRequestID'], $reply['CheckoutRequestID'], $paymentId);
-$stmt->execute();
-$stmt->close();
 
 header('Location: ../Frontend/mpesa-wait.php?id=' . $paymentId);
 exit;

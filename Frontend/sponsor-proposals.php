@@ -51,6 +51,13 @@ foreach ($proposals as $p) {
 }
 $stmt->close();
 
+// The sponsor's own phone, used as the default M-Pesa number for top-ups
+$stmt = $conn->prepare('SELECT phone FROM users WHERE id = ?');
+$stmt->bind_param('i', $sponsorId);
+$stmt->execute();
+$sponsorPhone = (string) ($stmt->get_result()->fetch_assoc()['phone'] ?? '');
+$stmt->close();
+
 $nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
 $initials  = strtoupper(mb_substr($nameParts[0], 0, 1) . (count($nameParts) > 1 ? mb_substr(end($nameParts), 0, 1) : ''));
 
@@ -113,7 +120,7 @@ $active = 'proposals';
           $pid       = (int) $p['id'];
           $total     = (float) $p['total'];
           $balance   = (float) $p['balance'];
-          $shortfall = max(0, $total - $balance);
+          $shortfall = (int) ceil(max(0, $total - $balance));   // whole shillings for M-Pesa
           $frozen    = $p['wallet_status'] !== 'active';
       ?>
         <section class="card proposal">
@@ -149,14 +156,21 @@ $active = 'proposals';
                 <div class="<?= $shortfall > 0 ? 'short' : '' ?>"><span>Still needed</span><b>KES <?= kes2($shortfall) ?></b></div>
               </div>
 
-              <div>
-                <label for="fund-<?= $pid ?>">Add to wallet when approving (KES)</label>
-                <input type="number" id="fund-<?= $pid ?>" name="fund_amount" min="0" step="0.01"
-                       value="<?= number_format($shortfall, 2, '.', '') ?>" <?= $frozen ? 'disabled' : '' ?>>
-                <p class="muted small" style="margin-top:4px;">
-                  <?= $frozen ? 'This wallet is frozen, so money can\'t be added.' : 'Pre-filled with what\'s still needed. Set 0 to approve without adding money.' ?>
-                </p>
+              <div class="two-col">
+                <div>
+                  <label for="fund-<?= $pid ?>">M-Pesa top-up (KES)</label>
+                  <input type="number" id="fund-<?= $pid ?>" name="fund_amount" min="0" max="250000" step="1"
+                  value="<?= $shortfall ?>" <?= $frozen ? 'disabled' : '' ?>>
+                </div>
+                <div>
+                  <label for="phone-<?= $pid ?>">Pay from number</label>
+                  <input type="tel" id="phone-<?= $pid ?>" name="phone" placeholder="0712 345 678"
+                  value="<?= htmlspecialchars($sponsorPhone) ?>" <?= $frozen ? 'disabled' : '' ?>>
+                </div>
               </div>
+              <p class="muted small" style="margin-top:-6px;">
+                <?= $frozen ? 'This wallet is frozen, so it can\'t be topped up.' : 'Pre-filled with what\'s still needed. If above 0, you\'ll get an M-Pesa prompt after approving. Set 0 to approve without topping up.' ?>
+              </p>
 
               <div>
                 <label for="feedback-<?= $pid ?>">Feedback for the student <span class="muted" style="font-weight:400;">(required for Request changes)</span></label>

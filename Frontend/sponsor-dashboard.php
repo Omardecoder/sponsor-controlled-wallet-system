@@ -209,6 +209,7 @@ $active = 'dashboard';
               <div>
                 <label for="wallet_id">Student</label>
                 <select id="wallet_id" name="wallet_id" required>
+                <option value="" selected disabled>Choose a student…</option>
                   <?php foreach ($wallets as $w): ?>
                     <option value="<?= (int) $w['id'] ?>" <?= $w['status'] !== 'active' ? 'disabled' : '' ?>>
                       <?= htmlspecialchars($w['full_name']) ?> — balance KES <?= kes2($w['balance']) ?><?= $w['status'] !== 'active' ? ' (frozen)' : '' ?>
@@ -228,7 +229,7 @@ $active = 'dashboard';
                 <label for="phone">Pay from M-Pesa number</label>
                 <input type="tel" id="phone" name="phone" required placeholder="0712 345 678" value="<?= htmlspecialchars($sponsorPhone) ?>">
               </div>
-                            <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Pay with M-Pesa</button>
+              <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Pay with M-Pesa</button>
               <p class="muted small">You'll get an M-Pesa prompt on this phone. The wallet is credited only after M-Pesa confirms the payment.</p>
             </form>
           <?php endif; ?>

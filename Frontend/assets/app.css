@@ -286,3 +286,8 @@ input[type=date] { width: 100%; font: inherit; color: var(--ink); background: #f
 .pay-icon.ok { background: var(--green-bg); color: var(--green); }
 .pay-icon.bad { background: var(--danger-bg); color: var(--danger); }
 .mpesa-tag { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; color: #fff; background: #3aa935; padding: 2px 9px; border-radius: 99px; }
+
+
+
+input[type=tel] { width: 100%; font: inherit; color: var(--ink); background: #fff; padding: 11px 12px; border: 1.5px solid #cfdad6; border-radius: 10px; }
+input[type=tel]:disabled, input[type=number]:disabled { background: var(--paper); color: var(--muted); }

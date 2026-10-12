@@ -2,15 +2,17 @@
 // Backend/review_budget_proposal.php
 // A sponsor reviews a budget proposal from one of THEIR students.
 //
-// decision = approve -> proposal becomes "approved", its amounts are copied into
-//                       budget_allocations, and (optionally) money is added to the wallet.
+// decision = approve -> proposal becomes "approved" and its amounts are copied into budget_allocations.
+//                       If the sponsor entered a top-up amount, an M-Pesa prompt is then sent to their
+//                       phone; the wallet is credited only when Safaricom confirms (mpesa_callback.php).
 // decision = changes -> proposal becomes "changes_requested" with the sponsor's feedback.
 //
-// Everything happens in one database transaction: all of it succeeds, or none of it does.
+// The approval itself happens in one database transaction: all of it succeeds, or none of it does.
 
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/mpesa_funding.php';
 require_role('sponsor');
 
 function back(string $type, string $message): void
@@ -28,7 +30,8 @@ $sponsorId  = (int) $_SESSION['user_id'];
 $proposalId = (int) ($_POST['proposal_id'] ?? 0);
 $decision   = $_POST['decision'] ?? '';
 $feedback   = trim($_POST['feedback'] ?? '');
-$fundRaw    = str_replace(',', '', trim($_POST['fund_amount'] ?? '0'));
+$fundRaw    = str_replace([',', ' '], '', trim($_POST['fund_amount'] ?? '0'));
+$phoneIn    = $_POST['phone'] ?? '';
 
 if (!in_array($decision, ['approve', 'changes'], true)) {
     back('error', 'Choose Approve or Request changes.');
@@ -40,18 +43,25 @@ if (mb_strlen($feedback) > 1000) {
     back('error', 'Feedback must be 1000 characters or fewer.');
 }
 
-// Money to add when approving (0 = approve without adding money)
-$fundCents = 0;
+// M-Pesa top-up when approving (0 = approve without topping up). Whole shillings only.
+$fundAmount = 0;
+$phone      = null;
 if ($decision === 'approve') {
     if ($fundRaw === '') {
         $fundRaw = '0';
     }
-    if (!preg_match('/^\d{1,9}(\.\d{1,2})?$/', $fundRaw)) {
-        back('error', 'Enter a valid amount to add, for example 1500 or 1500.50. Use 0 to add nothing.');
+    if (!preg_match('/^\d{1,7}$/', $fundRaw)) {
+        back('error', 'Enter the top-up as a whole amount in shillings, for example 1500. Use 0 to approve without topping up.');
     }
-    $fundCents = (int) round((float) $fundRaw * 100);
-    if ($fundCents > 100000000) {   // KES 1,000,000 - same limit as fund_wallet.php
-        back('error', 'The most you can add at one time is 1,000,000.');
+    $fundAmount = (int) $fundRaw;
+    if ($fundAmount > 250000) {
+        back('error', 'M-Pesa allows at most KSh 250,000 per transaction.');
+    }
+    if ($fundAmount > 0) {
+        $phone = mpesa_phone($phoneIn);
+        if ($phone === null) {
+            back('error', 'Enter a valid Safaricom number to pay the top-up from, for example 0712 345 678.');
+        }
     }
 }
 
@@ -83,7 +93,6 @@ try {
 
     $walletId   = (int) $proposal['wallet_id'];
     $newStatus  = $decision === 'approve' ? 'approved' : 'changes_requested';
-    $newBalance = null;
 
     if ($decision === 'approve') {
         // 1. Read the proposed amounts
@@ -133,37 +142,13 @@ try {
             $stmt->close();
         }
 
-        // 4. Add money to the wallet (same steps as fund_wallet.php)
-        if ($fundCents > 0) {
-            if ($proposal['wallet_status'] !== 'active') {
-                $conn->rollback();
-                back('error', 'This wallet is frozen, so money can\'t be added. Approve with 0, or unfreeze the wallet first.');
-            }
-            $amount = number_format($fundCents / 100, 2, '.', '');
-
-            $stmt = $conn->prepare('UPDATE wallets SET balance = balance + ? WHERE id = ?');
-            $stmt->bind_param('si', $amount, $walletId);
-            $stmt->execute();
-            $stmt->close();
-
-            $stmt = $conn->prepare('SELECT balance FROM wallets WHERE id = ?');
-            $stmt->bind_param('i', $walletId);
-            $stmt->execute();
-            $newBalance = $stmt->get_result()->fetch_assoc()['balance'];
-            $stmt->close();
-
-            $description = 'Funding for approved budget #' . $proposalId;
-            $stmt = $conn->prepare(
-                "INSERT INTO transactions (wallet_id, type, amount, balance_after, description, created_by)
-                 VALUES (?, 'funding', ?, ?, ?, ?)"
-            );
-            $stmt->bind_param('isssi', $walletId, $amount, $newBalance, $description, $sponsorId);
-            $stmt->execute();
-            $stmt->close();
+        if ($fundAmount > 0 && $proposal['wallet_status'] !== 'active') {
+            $conn->rollback();
+            back('error', 'This wallet is frozen, so it can\'t be topped up. Approve with 0, or unfreeze the wallet first.');
         }
     }
 
-    // 5. Record the decision
+    // 4. Record the decision
     $feedbackValue = $feedback !== '' ? $feedback : null;
     $stmt = $conn->prepare(
         'UPDATE budget_proposals
@@ -186,9 +171,19 @@ if ($newStatus === 'changes_requested') {
     back('success', 'Sent back to ' . $proposal['student_name'] . ' with your feedback.');
 }
 
-$message = 'Approved the budget from ' . $proposal['student_name'] . '.';
-if ($newBalance !== null) {
-    $message .= ' Added KES ' . number_format($fundCents / 100, 2)
-              . '. New wallet balance: KES ' . number_format((float) $newBalance, 2) . '.';
+// Approved. Now start the M-Pesa top-up, if one was requested.
+if ($fundAmount > 0) {
+    try {
+        $paymentId = mpesa_start_funding(
+            $conn, $sponsorId, $walletId, $fundAmount, $phone,
+            'Top-up for approved budget #' . $proposalId, $proposalId
+        );
+    } catch (Throwable $e) {
+        back('error', 'The budget from ' . $proposal['student_name'] . ' is approved, but the M-Pesa top-up could not start: '
+            . $e->getMessage() . ' You can send the money from the dashboard instead.');
+    }
+    header('Location: ../Frontend/mpesa-wait.php?id=' . $paymentId);
+    exit;
 }
-back('success', $message);
+
+back('success', 'Approved the budget from ' . $proposal['student_name'] . '.');
