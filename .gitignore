@@ -3,3 +3,4 @@
 Backend/test_*.php
 Backend/create_test_user.php
 Uploads/receipts/
+Backend/mpesa_config.php
