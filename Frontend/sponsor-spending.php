@@ -126,7 +126,7 @@ $active = 'spending';
           <label for="cat">Budget line</label>
           <select id="cat" name="cat">
             <option value="">All budget lines</option>
-            <?php foreach ($labels as $slug => $label): ?>
+            <?php foreach (sponsor_categories($sponsorId) as $slug => $label): ?>
               <option value="<?= htmlspecialchars($slug) ?>" <?= $catFilter === $slug ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
             <?php endforeach; ?>
           </select>

@@ -26,7 +26,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $studentId  = (int) $_SESSION['user_id'];
-$categories = budget_categories();
+// This student's categories: the standard ones + their own (e.g. "Entertainment")
+$stmt = $conn->prepare('SELECT id FROM wallets WHERE student_id = ? LIMIT 1');
+$stmt->bind_param('i', $studentId);
+$stmt->execute();
+$myWallet = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+$categories = budget_categories($myWallet ? (int) $myWallet['id'] : 0);
 $input      = $_POST['alloc'] ?? [];
 
 if (!is_array($input)) {

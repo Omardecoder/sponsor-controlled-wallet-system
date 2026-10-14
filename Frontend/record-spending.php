@@ -214,7 +214,7 @@ $active = (($_GET['view'] ?? '') === 'history') ? 'spending' : 'record';
               <label for="cat" class="sr-only">Filter by budget line</label>
               <select id="cat" name="cat" onchange="this.form.submit()">
                 <option value="">All budget lines</option>
-                <?php foreach ($labels as $slug => $label): ?>
+                <?php foreach (budget_categories((int) $wallet['id']) as $slug => $label): ?>
                   <option value="<?= htmlspecialchars($slug) ?>" <?= $catFilter === $slug ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
                 <?php endforeach; ?>
               </select>

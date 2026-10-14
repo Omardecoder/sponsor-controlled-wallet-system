@@ -318,3 +318,10 @@ input[type=tel]:disabled, input[type=number]:disabled { background: var(--paper)
 .alert-title a:hover { text-decoration: underline; }
 .alert-item time { white-space: nowrap; }
 @media (max-width: 560px) { .alert-item { flex-wrap: wrap; } .alert-item time { width: 100%; padding-left: 52px; } }
+
+
+/* ---------- Custom categories ---------- */
+.link-btn { background: none; border: 0; padding: 0 0 0 6px; font: inherit; font-size: .8rem; font-weight: 600; color: var(--danger); cursor: pointer; text-decoration: underline; }
+.link-btn:focus-visible { outline: 3px solid var(--saffron); border-radius: 4px; }
+.cat-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cat-name label { margin-bottom: 0; }

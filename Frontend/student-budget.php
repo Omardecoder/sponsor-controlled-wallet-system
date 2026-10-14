@@ -30,6 +30,7 @@ $proposed   = [];                    // slug => amount in the latest proposal
 
 if ($wallet) {
     $walletId = (int) $wallet['id'];
+    $categories = budget_categories($walletId);   // standard + this student's own categories
 
     // Current approved budget
     $stmt = $conn->prepare('SELECT category, allocated, spent FROM budget_allocations WHERE wallet_id = ?');
@@ -182,7 +183,14 @@ $active = 'budget';
               ?>
                 <div class="cat-row">
                   <div>
-                    <label for="alloc-<?= htmlspecialchars($slug) ?>"><?= htmlspecialchars($label) ?></label>
+                    <div class="cat-name">
+                      <label for="alloc-<?= htmlspecialchars($slug) ?>"><?= htmlspecialchars($label) ?></label>
+                      <?php if (is_custom_category($slug)): ?>
+                        <span class="pill grey">Your category</span>
+                        <button type="submit" form="remove-<?= htmlspecialchars($slug) ?>" class="link-btn"
+                                onclick="return confirm('Remove the category <?= htmlspecialchars(addslashes($label)) ?>?');">Remove</button>
+                      <?php endif; ?>
+                    </div>
                     <div class="muted small">
                       <?= $now > 0 ? 'Approved now: ' . ksh($now) : 'Not in your approved budget' ?>
                       <?= $spent > 0 ? ' · already spent ' . ksh($spent) : '' ?>
@@ -209,6 +217,31 @@ $active = 'budget';
               </button>
             <?php endif; ?>
           </form>
+
+          <?php // One tiny form per custom category, used by its "Remove" button (forms can't be nested) ?>
+          <?php foreach ($categories as $slug => $label): if (!is_custom_category($slug)) continue; ?>
+            <form id="remove-<?= htmlspecialchars($slug) ?>" action="../Backend/category_action.php" method="post" hidden>
+              <input type="hidden" name="action" value="remove">
+              <input type="hidden" name="id" value="<?= (int) substr($slug, 1) ?>">
+            </form>
+          <?php endforeach; ?>
+        </section>
+
+        <!-- Add your own category -->
+        <section class="card" id="categories">
+          <div class="card-head">
+            <h3>Add your own category</h3>
+            <span class="muted small"><?= count($categories) - count(STANDARD_CATEGORIES) ?> of <?= MAX_CUSTOM_CATEGORIES ?> used</span>
+          </div>
+          <form action="../Backend/category_action.php" method="post" class="row">
+            <input type="hidden" name="action" value="add">
+            <div>
+              <label for="new-cat">Category name</label>
+              <input type="text" id="new-cat" name="name" minlength="2" maxlength="30" required placeholder="e.g. Entertainment, Medical, Clothing">
+            </div>
+            <button type="submit" class="btn btn-outline"><?= sw_icon('plus') ?>Add category</button>
+          </form>
+          <p class="muted small" style="margin-top:8px;">New categories appear in the list above. Your sponsor sees them in your budget and approves the amounts like any other category.</p>
         </section>
       <?php endif; ?>
     </main>
