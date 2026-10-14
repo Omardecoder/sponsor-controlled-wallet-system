@@ -113,4 +113,19 @@ try {
     back('error', 'The proposal could not be saved. Please try again.');
 }
 
+// ---- Alert the sponsor that a budget is waiting ----
+require_once __DIR__ . '/notify.php';
+$stmt = $conn->prepare('SELECT sponsor_id FROM wallets WHERE id = ?');
+$stmt->bind_param('i', $walletId);
+$stmt->execute();
+$sponsorIdForAlert = (int) ($stmt->get_result()->fetch_assoc()['sponsor_id'] ?? 0);
+$stmt->close();
+if ($sponsorIdForAlert) {
+    notify(
+        $conn, $sponsorIdForAlert, 'proposal_submitted',
+        $_SESSION['full_name'] . ' submitted a budget',
+        'KSh ' . number_format($totalCents / 100) . ' across ' . count($items) . ' categories, waiting for your approval.',
+        'sponsor-proposals.php'
+    );
+}
 back('success', 'Your budget proposal has been sent to your sponsor for review.');

@@ -211,5 +211,47 @@ try {
     back('error', 'Something went wrong. The expense was not recorded. Please try again.', $old);
 }
 
+// ---- Alerts: budget line limits and missing receipts ----
+require_once __DIR__ . '/notify.php';
+$stmt = $conn->prepare(
+    'SELECT w.sponsor_id, u.full_name FROM wallets w JOIN users u ON u.id = w.student_id WHERE w.id = ?'
+);
+$stmt->bind_param('i', $walletId);
+$stmt->execute();
+$who = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+$lineName    = budget_categories()[$category];
+$allocated   = (float) $line['allocated'];
+$spentBefore = (float) $line['spent'];
+$spentAfter  = $spentBefore + (float) $amount;
+$usedText    = 'KSh ' . number_format($spentAfter) . ' of KSh ' . number_format($allocated) . ' spent.';
+// The key includes the allocated amount, so a newly approved budget can trigger the alert again
+$keyBase     = $walletId . ':' . $category . ':' . (int) $allocated;
+
+if ($allocated > 0 && $spentAfter >= $allocated) {
+    notify($conn, $studentId, 'budget_100', "You've used all of your $lineName budget", $usedText, 'record-spending.php', 'b100:' . $keyBase);
+    if ($who) {
+        notify($conn, (int) $who['sponsor_id'], 'budget_100', $who['full_name'] . " has used all of $lineName", $usedText, 'sponsor-spending.php', 'b100:' . $keyBase);
+    }
+} elseif ($allocated > 0 && $spentAfter / $allocated >= 0.8 && $spentBefore / $allocated < 0.8) {
+    $pct = (int) floor($spentAfter / $allocated * 100);
+    notify($conn, $studentId, 'budget_80', "You've used $pct% of your $lineName budget", $usedText, 'record-spending.php', 'b80:' . $keyBase);
+    if ($who) {
+        notify($conn, (int) $who['sponsor_id'], 'budget_80', $who['full_name'] . " has used $pct% of $lineName", $usedText, 'sponsor-spending.php', 'b80:' . $keyBase);
+    }
+}
+
+// Large expense with no receipt: tell the sponsor
+const LARGE_EXPENSE_KSH = 5000;
+if (!$receipt && (float) $amount >= LARGE_EXPENSE_KSH && $who) {
+    notify(
+        $conn, (int) $who['sponsor_id'], 'receipt_missing',
+        'Large expense without a receipt',
+        $who['full_name'] . ' recorded KSh ' . number_format((float) $amount) . " for $lineName (\"$description\") with no receipt.",
+        'sponsor-spending.php'
+    );
+}
+
 back('success', 'Recorded KSh ' . number_format((float) $amount, 2) . ' for ' . budget_categories()[$category]
     . ($receipt ? ' with a receipt' : '') . '. New balance: KSh ' . number_format((float) $newBalance, 2) . '.');

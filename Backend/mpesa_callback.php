@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/mpesa_config.php';
+require_once __DIR__ . '/notify.php';
 
 header('Content-Type: application/json');
 
@@ -32,6 +33,21 @@ if (!$cb || empty($cb['CheckoutRequestID'])) {
 $checkoutId = (string) $cb['CheckoutRequestID'];
 $resultCode = (string) ($cb['ResultCode'] ?? '');
 $resultDesc = mb_substr((string) ($cb['ResultDesc'] ?? ''), 0, 255);
+
+/** Student id and name for a wallet (for alerts). */
+function wallet_student(mysqli $conn, int $walletId): ?array
+{
+    try {
+        $stmt = $conn->prepare('SELECT u.id, u.full_name FROM wallets w JOIN users u ON u.id = w.student_id WHERE w.id = ?');
+        $stmt->bind_param('i', $walletId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    } catch (Throwable $e) {
+        return null;   // an alert problem must never affect the payment
+    }
+}
 
 // Pull the details Safaricom sends on success
 $meta = [];
@@ -66,6 +82,15 @@ try {
         $stmt->execute();
         $stmt->close();
         $conn->commit();
+
+        // Alert the sponsor that it didn't go through
+        $student = wallet_student($conn, (int) $payment['wallet_id']);
+        notify(
+            $conn, (int) $payment['sponsor_id'], 'payment_failed',
+            'M-Pesa payment not completed',
+            'KSh ' . number_format((float) $payment['amount']) . ($student ? ' to ' . $student['full_name'] : '') . ': ' . $resultDesc . ' No money was added.',
+            'sponsor-dashboard.php#send-funds'
+        );
         reply_ok();
     }
 
@@ -113,6 +138,23 @@ try {
     $stmt->close();
 
     $conn->commit();
+
+    // Alerts: the student got money, the sponsor's payment is confirmed
+    $student = wallet_student($conn, $walletId);
+    if ($student) {
+        notify(
+            $conn, (int) $student['id'], 'funds_received',
+            'KSh ' . number_format((float) $amount) . ' added to your wallet',
+            'Sent by your sponsor via M-Pesa' . ($receipt ? ' (' . $receipt . ')' : '') . '. New balance: KSh ' . number_format((float) $newBalance, 2) . '.',
+            'student-dashboard.php?tx=funding#transactions'
+        );
+    }
+    notify(
+        $conn, $sponsorId, 'funds_confirmed',
+        'Payment confirmed: KSh ' . number_format((float) $amount) . ($student ? ' to ' . $student['full_name'] : ''),
+        'M-Pesa receipt ' . ($receipt ?? '—') . '.',
+        'sponsor-dashboard.php#transactions'
+    );
 
 } catch (Throwable $e) {
     try { $conn->rollback(); } catch (Throwable $ignored) {}

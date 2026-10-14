@@ -8,6 +8,8 @@
 // It also sets $pendingCount (proposals waiting for this sponsor)
 // and the sw_icon() function, so the page can use both after the include.
 
+require_once __DIR__ . '/../../Backend/notify.php';
+
 $active = $active ?? '';
 
 // Proposals waiting for this sponsor (shown as a badge)
@@ -22,6 +24,7 @@ $stmt->bind_param('i', $sidebarSponsorId);
 $stmt->execute();
 $pendingCount = (int) $stmt->get_result()->fetch_assoc()['n'];
 $stmt->close();
+$alertCount = unread_alerts($conn, $sidebarSponsorId);
 
 if (!function_exists('sw_icon')) {
     // Small line icons (from the Lucide icon set)
@@ -50,6 +53,7 @@ if (!function_exists('sw_icon')) {
 // [key, label, link, icon]. A null link = page not built yet ("Soon").
 $sidebarLinks = [
     ['dashboard', 'Dashboard',        'sponsor-dashboard.php',              'dashboard'],
+    ['alerts',    'Alerts',           'alerts.php',                         'bell'],
     ['students',  'My Students',      'sponsor-dashboard.php#students',     'students'],
     ['send',      'Send Funds',       'sponsor-dashboard.php#send-funds',   'send'],
     ['proposals', 'Budget Proposals', 'sponsor-proposals.php',              'proposals'],
@@ -76,7 +80,8 @@ $sidebarLinks = [
           <?php else: ?>
             <a href="<?= $href ?>" class="<?= $active === $key ? 'active' : '' ?>" <?= $active === $key ? 'aria-current="page"' : '' ?>>
               <?= sw_icon($icon) ?><?= $label ?>
-              <?php if ($key === 'proposals' && $pendingCount > 0): ?><span class="count"><?= $pendingCount ?></span><?php endif; ?>
+                            <?php $badge = ['proposals' => $pendingCount, 'alerts' => ($active === 'alerts' ? 0 : $alertCount)][$key] ?? 0; ?>
+              <?php if ($badge > 0): ?><span class="count"><?= $badge ?></span><?php endif; ?>
             </a>
           <?php endif; ?>
         </li>

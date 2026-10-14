@@ -167,6 +167,32 @@ try {
     back('error', 'Something went wrong. Nothing was changed. Please try again.');
 }
 
+// ---- Alert the student about the decision ----
+require_once __DIR__ . '/notify.php';
+$stmt = $conn->prepare('SELECT student_id FROM wallets WHERE id = ?');
+$stmt->bind_param('i', $walletId);
+$stmt->execute();
+$studentIdForAlert = (int) ($stmt->get_result()->fetch_assoc()['student_id'] ?? 0);
+$stmt->close();
+if ($studentIdForAlert) {
+    if ($newStatus === 'approved') {
+        notify(
+            $conn, $studentIdForAlert, 'budget_approved',
+            'Your budget was approved',
+            $_SESSION['full_name'] . ' approved your budget.' . ($fundAmount > 0 ? ' A top-up of KSh ' . number_format($fundAmount) . ' is on the way via M-Pesa.' : '')
+                . ($feedback !== '' ? ' Note: "' . $feedback . '"' : ''),
+            'student-dashboard.php'
+        );
+    } else {
+        notify(
+            $conn, $studentIdForAlert, 'budget_changes',
+            'Changes requested on your budget',
+            $_SESSION['full_name'] . ' says: "' . $feedback . '"',
+            'student-budget.php'
+        );
+    }
+}
+
 if ($newStatus === 'changes_requested') {
     back('success', 'Sent back to ' . $proposal['student_name'] . ' with your feedback.');
 }
