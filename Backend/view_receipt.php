@@ -15,19 +15,21 @@ if ($userId === 0) {
 $expenseId = (int) ($_GET['id'] ?? 0);
 
 $stmt = $conn->prepare(
-    'SELECT e.receipt_file, e.receipt_name, e.receipt_type, w.student_id, w.sponsor_id
+    "SELECT e.receipt_file, e.receipt_name, e.receipt_type, w.student_id,
+            EXISTS (SELECT 1 FROM sponsorships sp
+                     WHERE sp.student_id = w.student_id AND sp.sponsor_id = ? AND sp.status = 'active') AS is_sponsor
      FROM expenses e
      JOIN wallets w ON w.id = e.wallet_id
-     WHERE e.id = ?'
+     WHERE e.id = ?"
 );
-$stmt->bind_param('i', $expenseId);
+$stmt->bind_param('ii', $userId, $expenseId);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 $allowed = $row && (
     ($role === 'student' && (int) $row['student_id'] === $userId) ||
-    ($role === 'sponsor' && (int) $row['sponsor_id'] === $userId) ||
+    ($role === 'sponsor' && (int) $row['is_sponsor'] === 1) ||   // any of the student's active sponsors
     $role === 'admin'
 );
 

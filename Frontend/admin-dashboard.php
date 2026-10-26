@@ -52,15 +52,16 @@ if ($roleFilter) {
     $types .= 's';
     $params[] = $roleFilter;
 }
-$sql = 'SELECT u.id, u.full_name, u.email, u.phone, u.role, u.created_at,
-               s.full_name AS sponsor_name,
-               (SELECT COUNT(*) FROM wallets x WHERE x.sponsor_id = u.id) AS student_count
+// A student can have several sponsors and a sponsor several students (sponsorships table)
+$sql = "SELECT u.id, u.full_name, u.email, u.phone, u.role, u.created_at,
+               (SELECT GROUP_CONCAT(s.full_name ORDER BY x.created_at SEPARATOR ', ')
+                  FROM sponsorships x JOIN users s ON s.id = x.sponsor_id
+                 WHERE x.student_id = u.id AND x.status = 'active') AS sponsor_name,
+               (SELECT COUNT(*) FROM sponsorships x WHERE x.sponsor_id = u.id AND x.status = 'active') AS student_count
         FROM users u
-        LEFT JOIN wallets w ON w.student_id = u.id
-        LEFT JOIN users s   ON s.id = w.sponsor_id
-        WHERE ' . implode(' AND ', $where) . '
+        WHERE " . implode(' AND ', $where) . "
         ORDER BY u.created_at DESC
-        LIMIT 100';
+        LIMIT 100";
 $stmt = $conn->prepare($sql);
 if ($params) {
     $stmt->bind_param($types, ...$params);
@@ -71,13 +72,15 @@ $stmt->close();
 
 // ---------- Wallets ----------
 $wallets = $conn->query(
-    'SELECT w.id, w.balance, w.status, w.created_at,
-            st.full_name AS student_name, sp.full_name AS sponsor_name,
-            (SELECT COALESCE(SUM(amount), 0) FROM transactions t WHERE t.wallet_id = w.id AND t.type = \'spending\') AS spent
+    "SELECT w.id, w.balance, w.status, w.created_at,
+            st.full_name AS student_name,
+            (SELECT GROUP_CONCAT(s.full_name ORDER BY x.created_at SEPARATOR ', ')
+               FROM sponsorships x JOIN users s ON s.id = x.sponsor_id
+              WHERE x.student_id = w.student_id AND x.status = 'active') AS sponsor_name,
+            (SELECT COALESCE(SUM(amount), 0) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 'spending') AS spent
      FROM wallets w
      JOIN users st ON st.id = w.student_id
-     JOIN users sp ON sp.id = w.sponsor_id
-     ORDER BY w.status DESC, st.full_name'
+     ORDER BY w.status DESC, st.full_name"
 )->fetch_all(MYSQLI_ASSOC);
 
 // ---------- M-Pesa payments ----------
@@ -216,7 +219,7 @@ $active = 'overview';
                     <td><span class="pill <?= ['student' => 'green', 'sponsor' => 'amber', 'admin' => 'grey'][$u['role']] ?? 'grey' ?>"><?= ucfirst(htmlspecialchars($u['role'])) ?></span></td>
                     <td>
                       <?php if ($u['role'] === 'student'): ?>
-                        <?= $u['sponsor_name'] ? 'Sponsor: ' . htmlspecialchars($u['sponsor_name']) : '<span class="muted">Not linked yet</span>' ?>
+                        <?= $u['sponsor_name'] ? 'Sponsored by ' . htmlspecialchars($u['sponsor_name']) : '<span class="muted">Not linked yet</span>' ?>
                       <?php elseif ($u['role'] === 'sponsor'): ?>
                         <?= (int) $u['student_count'] ?> student<?= (int) $u['student_count'] === 1 ? '' : 's' ?>
                       <?php else: ?>
@@ -243,12 +246,12 @@ $active = 'overview';
         <?php else: ?>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Student</th><th>Sponsor</th><th class="num">Balance</th><th class="num">Spent</th><th>Status</th><th>Action</th></tr></thead>
+              <thead><tr><th>Student</th><th>Sponsors</th><th class="num">Balance</th><th class="num">Spent</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
                 <?php foreach ($wallets as $wl): $frozen = $wl['status'] !== 'active'; ?>
                   <tr>
                     <td><strong><?= htmlspecialchars($wl['student_name']) ?></strong></td>
-                    <td><?= htmlspecialchars($wl['sponsor_name']) ?></td>
+                    <td><?= $wl['sponsor_name'] ? htmlspecialchars($wl['sponsor_name']) : '<span class="muted">None active</span>' ?></td>
                     <td class="num"><?= number_format((float) $wl['balance'], 2) ?></td>
                     <td class="num"><?= number_format((float) $wl['spent'], 2) ?></td>
                     <td><span class="pill <?= $frozen ? 'red' : 'green' ?>"><?= $frozen ? 'Frozen' : 'Active' ?></span></td>

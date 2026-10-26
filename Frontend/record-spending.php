@@ -17,8 +17,8 @@ unset($_SESSION['flash'], $_SESSION['expense_old']);
 $labels = budget_categories();   // slug => label
 
 $stmt = $conn->prepare(
-    'SELECT w.id, w.balance, w.status, s.full_name AS sponsor_name
-     FROM wallets w JOIN users s ON s.id = w.sponsor_id
+    'SELECT w.id, w.balance, w.status
+     FROM wallets w
      WHERE w.student_id = ? LIMIT 1'
 );
 $stmt->bind_param('i', $studentId);

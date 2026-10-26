@@ -1,27 +1,32 @@
 <?php
 // Frontend/student-budget.php
-// Student: plan a budget across categories and send it to the sponsor for approval.
+// Student: plan a budget across categories and send it to their sponsors for approval.
+// The budget total can't be more than the sponsors' pledges added together.
 // Posts to ../Backend/submit_budget_proposal.php (fields: alloc[slug]).
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
+require_once __DIR__ . '/../Backend/sponsorship.php';
 require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
-// The student's wallet and sponsor
-$stmt = $conn->prepare(
-    'SELECT w.id, w.balance, w.status, s.full_name AS sponsor_name
-     FROM wallets w JOIN users s ON s.id = w.sponsor_id
-     WHERE w.student_id = ? LIMIT 1'
-);
+// The student's wallet, sponsors and the total they pledged
+$stmt = $conn->prepare('SELECT id, balance, status FROM wallets WHERE student_id = ? LIMIT 1');
 $stmt->bind_param('i', $studentId);
 $stmt->execute();
 $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
+
+$sponsors = student_sponsors($conn, $studentId);
+$pledged  = array_sum(array_column($sponsors, 'pledge'));
+if (!$sponsors) {
+    $wallet = null;   // no accepted sponsor yet: nothing to plan for
+}
+$approvals = null;
 
 $categories = budget_categories();   // slug => label
 $approved   = [];                    // slug => ['allocated' => .., 'spent' => ..]
@@ -41,8 +46,12 @@ if ($wallet) {
     }
     $stmt->close();
 
-    // Latest proposal and its amounts
-    $stmt = $conn->prepare('SELECT id, status, sponsor_feedback, created_at FROM budget_proposals WHERE wallet_id = ? ORDER BY id DESC LIMIT 1');
+    // Latest proposal, its amounts, and who asked for changes
+    $stmt = $conn->prepare(
+        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at, r.full_name AS reviewer_name
+         FROM budget_proposals p LEFT JOIN users r ON r.id = p.reviewed_by
+         WHERE p.wallet_id = ? ORDER BY p.id DESC LIMIT 1'
+    );
     $stmt->bind_param('i', $walletId);
     $stmt->execute();
     $proposal = $stmt->get_result()->fetch_assoc();
@@ -57,6 +66,9 @@ if ($wallet) {
             $proposed[$row['category']] = (float) $row['proposed_amount'];
         }
         $stmt->close();
+        if ($proposal['status'] === 'pending') {
+            $approvals = proposal_approvals($conn, $pid, $studentId);
+        }
     }
 }
 
@@ -118,7 +130,7 @@ $active = 'budget';
       <div class="page-head">
         <div>
           <h2>Plan my budget</h2>
-          <p class="muted">Decide how much goes to each category, then send it to your sponsor for approval.</p>
+          <p class="muted">Decide how much goes to each category, then send it to your sponsors for approval.</p>
         </div>
       </div>
 
@@ -129,19 +141,24 @@ $active = 'budget';
       <?php if (!$wallet): ?>
         <section class="card">
           <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
-          <p class="muted">Ask your sponsor to add you from their dashboard using the email or phone number you registered with.</p>
+          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, then accept their request on your dashboard.</p>
         </section>
 
       <?php else: ?>
 
         <?php if ($isPending): ?>
           <div class="notice">
-            <span><strong>Waiting for <?= htmlspecialchars($wallet['sponsor_name']) ?>.</strong>
-              You sent this budget on <?= htmlspecialchars(date('j M Y, H:i', strtotime($proposal['created_at']))) ?>. You can send a new one after they review it.</span>
+            <span><strong>Waiting for approval<?= $approvals['needed'] > 1 ? ' (' . $approvals['approved'] . ' of ' . $approvals['needed'] . ' sponsors approved)' : '' ?>.</strong>
+              You sent this budget on <?= htmlspecialchars(date('j M Y, H:i', strtotime($proposal['created_at']))) ?>. You can send a new one after your sponsors review it.
+              <br>
+              <?php foreach ($approvals['sponsors'] as $a): ?>
+                <span class="pill <?= $a['decision'] === 'approved' ? 'green' : 'amber' ?>"><?= htmlspecialchars($a['full_name']) ?>: <?= $a['decision'] === 'approved' ? 'approved' : 'waiting' ?></span>
+              <?php endforeach; ?>
+            </span>
           </div>
         <?php elseif ($needsChange): ?>
           <div class="notice">
-            <span><strong><?= htmlspecialchars($wallet['sponsor_name']) ?> asked for changes.</strong>
+            <span><strong><?= htmlspecialchars($proposal['reviewer_name'] ?? 'Your sponsor') ?> asked for changes.</strong>
               <?php if ($proposal['sponsor_feedback']): ?><br><span class="muted">“<?= htmlspecialchars($proposal['sponsor_feedback']) ?>”</span><?php endif; ?>
               <br>Adjust the amounts below and submit again.</span>
           </div>
@@ -150,7 +167,12 @@ $active = 'budget';
         <?php endif; ?>
 
         <!-- Live figures -->
-        <section class="stats stats-3" aria-label="Budget figures">
+        <section class="stats" aria-label="Budget figures">
+          <div class="card stat">
+            <div class="stat-label">Sponsors' pledges</div>
+            <div class="stat-value"><?= ksh($pledged) ?></div>
+            <div class="stat-note">Your budget can't be more than this</div>
+          </div>
           <div class="card stat">
             <div class="stat-label">Wallet balance</div>
             <div class="stat-value"><?= ksh($balance) ?></div>
@@ -174,7 +196,7 @@ $active = 'budget';
           </div>
 
           <form id="budget-form" action="../Backend/submit_budget_proposal.php" method="post"
-                data-balance="<?= htmlspecialchars((string) $balance) ?>">
+                data-balance="<?= htmlspecialchars((string) $balance) ?>" data-pledged="<?= htmlspecialchars((string) $pledged) ?>">
             <div class="cat-list">
               <?php foreach ($categories as $slug => $label):
                   $spent = (float) ($approved[$slug]['spent'] ?? 0);
@@ -212,8 +234,8 @@ $active = 'budget';
 
             <?php if (!$locked): ?>
               <button type="submit" class="btn btn-lg" id="save"
-                      onclick="return confirm('Send this budget to <?= htmlspecialchars(addslashes($wallet['sponsor_name'])) ?> for approval?');">
-                <?= sw_icon('send') ?>Submit to sponsor
+                      onclick="return confirm('Send this budget to your sponsor<?= count($sponsors) > 1 ? 's' : '' ?> for approval?');">
+                <?= sw_icon('send') ?>Submit to sponsor<?= count($sponsors) > 1 ? 's' : '' ?>
               </button>
             <?php endif; ?>
           </form>
@@ -241,7 +263,7 @@ $active = 'budget';
             </div>
             <button type="submit" class="btn btn-outline"><?= sw_icon('plus') ?>Add category</button>
           </form>
-          <p class="muted small" style="margin-top:8px;">New categories appear in the list above. Your sponsor sees them in your budget and approves the amounts like any other category.</p>
+          <p class="muted small" style="margin-top:8px;">New categories appear in the list above. Your sponsors see them in your budget and approve the amounts like any other category.</p>
         </section>
       <?php endif; ?>
     </main>
@@ -253,6 +275,7 @@ $active = 'budget';
   const form = document.getElementById('budget-form');
   if (form) {
     const balance = parseFloat(form.dataset.balance) || 0;
+    const pledged = parseFloat(form.dataset.pledged) || 0;
     const inputs  = form.querySelectorAll('.alloc');
     const totalEl = document.getElementById('total');
     const gapEl   = document.getElementById('gap');
@@ -283,12 +306,14 @@ $active = 'budget';
         gapLbl.textContent = 'Sponsor would add';
         gapEl.textContent = fmt(-gap);
         gapEl.classList.add('warn-text');
-        gapNote.textContent = 'More than your balance. Your sponsor can top up when approving.';
+        gapNote.textContent = 'More than your balance. Your sponsors send the rest when approving.';
       }
 
-      warn.textContent = belowSpent ? 'A category cannot be lower than what you have already spent in it.'
-                       : total <= 0 ? 'Enter an amount for at least one category.' : '';
-      if (save) save.disabled = belowSpent || total <= 0;
+      const overPledge = total > pledged + 0.001;
+      warn.textContent = !save ? '' : belowSpent ? 'A category cannot be lower than what you have already spent in it.'
+                       : total <= 0 ? 'Enter an amount for at least one category.'
+                       : overPledge ? 'Your budget is ' + fmt(total - pledged) + ' more than your sponsors pledged (' + fmt(pledged) + '). Lower some amounts.' : '';
+      if (save) save.disabled = belowSpent || total <= 0 || overPledge;
     }
     inputs.forEach(i => i.addEventListener('input', update));
     update();

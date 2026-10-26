@@ -1,11 +1,14 @@
 <?php
 // Frontend/sponsor-proposals.php
 // Sponsor: review budget proposals from your students. Approve (and fund) or request changes.
+// A student can have several sponsors: every one of them must approve. Each sponsor sees who
+// has approved so far, and can top up only from what is left of their own pledge.
 // Posts to ../Backend/review_budget_proposal.php.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
+require_once __DIR__ . '/../Backend/sponsorship.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
@@ -15,19 +18,20 @@ unset($_SESSION['flash']);
 
 $labels = budget_categories();   // slug => label
 
-// Proposals on wallets this sponsor controls (budget_proposals.wallet_id -> wallets.sponsor_id)
+// Proposals from students this sponsor actively sponsors
 function load_proposals(mysqli $conn, int $sponsorId, bool $pending): array
 {
-    $sql = "SELECT p.id, p.status, p.created_at, p.reviewed_at, p.sponsor_feedback,
-                   w.balance, w.status AS wallet_status,
+    $sql = "SELECT p.id, p.status, p.created_at, p.reviewed_at, p.reviewed_by, p.sponsor_feedback,
+                   w.id AS wallet_id, w.student_id, w.balance, w.status AS wallet_status,
                    u.full_name AS student_name, u.email, u.phone,
-                   COALESCE(SUM(i.proposed_amount), 0) AS total
+                   sp.pledge, rv.full_name AS reviewer_name,
+                   (SELECT COALESCE(SUM(i.proposed_amount), 0) FROM budget_proposal_items i WHERE i.proposal_id = p.id) AS total
             FROM budget_proposals p
             JOIN wallets w ON w.id = p.wallet_id
             JOIN users u   ON u.id = w.student_id
-            LEFT JOIN budget_proposal_items i ON i.proposal_id = p.id
-            WHERE w.sponsor_id = ? AND " . ($pending ? "p.status = 'pending'" : "p.status <> 'pending'") . "
-            GROUP BY p.id
+            JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.sponsor_id = ? AND sp.status = 'active'
+            LEFT JOIN users rv ON rv.id = p.reviewed_by
+            WHERE " . ($pending ? "p.status = 'pending'" : "p.status <> 'pending'") . "
             ORDER BY " . ($pending ? 'p.created_at ASC, p.id ASC' : 'p.reviewed_at DESC, p.id DESC LIMIT 10');
     $stmt = $conn->prepare($sql);
     $stmt->bind_param('i', $sponsorId);
@@ -39,6 +43,25 @@ function load_proposals(mysqli $conn, int $sponsorId, bool $pending): array
 
 $proposals = load_proposals($conn, $sponsorId, true);
 $reviewed  = load_proposals($conn, $sponsorId, false);
+
+// For each pending proposal: who has approved, and what is left of this sponsor's pledge
+$approvals = [];
+$myLeft    = [];
+$pledgeSum = [];
+foreach ($proposals as $p) {
+    $pid = (int) $p['id'];
+    $approvals[$pid] = proposal_approvals($conn, $pid, (int) $p['student_id']);
+    $myLeft[$pid]    = max(0, (float) $p['pledge'] - sponsor_pledge_used($conn, $sponsorId, (int) $p['wallet_id']));
+    $pledgeSum[$pid] = pledge_total($conn, (int) $p['student_id']);
+}
+$waitingForMe = count(array_filter($proposals, function ($p) use ($approvals, $sponsorId) {
+    foreach ($approvals[(int) $p['id']]['sponsors'] as $s) {
+        if ((int) $s['sponsor_id'] === $sponsorId) {
+            return $s['decision'] === null;
+        }
+    }
+    return false;
+}));
 
 // Category lines for each pending proposal
 $items = [];
@@ -103,8 +126,8 @@ $active = 'proposals';
     <main class="page">
       <div class="page-head">
         <div>
-          <h2>Waiting for your review (<?= count($proposals) ?>)</h2>
-          <p class="muted">Approve a student's plan and add the money it needs, or send it back with feedback.</p>
+          <h2>Waiting for your review (<?= $waitingForMe ?>)</h2>
+          <p class="muted">Approve a student's plan and add your share of the money, or send it back with feedback. When a student has several sponsors, every sponsor must approve.</p>
         </div>
       </div>
 
@@ -122,6 +145,16 @@ $active = 'proposals';
           $balance   = (float) $p['balance'];
           $shortfall = (int) ceil(max(0, $total - $balance));   // whole shillings for M-Pesa
           $frozen    = $p['wallet_status'] !== 'active';
+          $state     = $approvals[$pid];
+          $multi     = $state['needed'] > 1;
+          $myShare   = $pledgeSum[$pid] > 0 ? (float) $p['pledge'] / $pledgeSum[$pid] : 1;
+          $suggest   = (int) min(floor($myLeft[$pid]), ceil($shortfall * $myShare));   // my share of what is missing
+          $decided   = false;
+          foreach ($state['sponsors'] as $s) {
+              if ((int) $s['sponsor_id'] === $sponsorId && $s['decision'] !== null) {
+                  $decided = true;
+              }
+          }
       ?>
         <section class="card proposal">
           <div class="card-head">
@@ -131,6 +164,17 @@ $active = 'proposals';
             </div>
             <div class="stat-value">KES <?= number_format($total, 0) ?></div>
           </div>
+
+          <?php if ($multi): ?>
+            <div class="approval-strip">
+              <span class="muted small"><?= $state['approved'] ?> of <?= $state['needed'] ?> sponsors approved:</span>
+              <?php foreach ($state['sponsors'] as $s): ?>
+                <span class="pill <?= $s['decision'] === 'approved' ? 'green' : 'amber' ?>">
+                  <?= (int) $s['sponsor_id'] === $sponsorId ? 'You' : htmlspecialchars($s['full_name']) ?>: <?= $s['decision'] === 'approved' ? 'approved' : 'waiting' ?>
+                </span>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
 
           <div class="proposal-body">
             <div class="table-wrap">
@@ -148,19 +192,29 @@ $active = 'proposals';
               </table>
             </div>
 
+            <?php if ($decided): ?>
+              <div class="form-grid">
+                <div class="alert success">You approved this budget. It becomes active when the other sponsor<?= $state['needed'] - $state['approved'] === 1 ? '' : 's' ?> approve<?= $state['needed'] - $state['approved'] === 1 ? 's' : '' ?>.</div>
+                <div class="money-box">
+                  <div><span>In the wallet now</span><b>KES <?= kes2($balance) ?></b></div>
+                  <div><span>Left of your pledge</span><b>KES <?= kes2($myLeft[$pid]) ?></b></div>
+                </div>
+              </div>
+            <?php else: ?>
             <form action="../Backend/review_budget_proposal.php" method="post" class="form-grid">
               <input type="hidden" name="proposal_id" value="<?= $pid ?>">
 
               <div class="money-box">
                 <div><span>In the wallet now</span><b>KES <?= kes2($balance) ?></b></div>
                 <div class="<?= $shortfall > 0 ? 'short' : '' ?>"><span>Still needed</span><b>KES <?= kes2($shortfall) ?></b></div>
+                <div><span>Left of your pledge</span><b>KES <?= kes2($myLeft[$pid]) ?></b></div>
               </div>
 
               <div class="two-col">
                 <div>
                   <label for="fund-<?= $pid ?>">M-Pesa top-up (KES)</label>
-                  <input type="number" id="fund-<?= $pid ?>" name="fund_amount" min="0" max="250000" step="1"
-                  value="<?= $shortfall ?>" <?= $frozen ? 'disabled' : '' ?>>
+                  <input type="number" id="fund-<?= $pid ?>" name="fund_amount" min="0" max="<?= (int) min(250000, floor($myLeft[$pid])) ?>" step="1"
+                  value="<?= max(0, $suggest) ?>" <?= $frozen ? 'disabled' : '' ?>>
                 </div>
                 <div>
                   <label for="phone-<?= $pid ?>">Pay from number</label>
@@ -169,7 +223,10 @@ $active = 'proposals';
                 </div>
               </div>
               <p class="muted small" style="margin-top:-6px;">
-                <?= $frozen ? 'This wallet is frozen, so it can\'t be topped up.' : 'Pre-filled with what\'s still needed. If above 0, you\'ll get an M-Pesa prompt after approving. Set 0 to approve without topping up.' ?>
+                <?= $frozen ? 'This wallet is frozen, so it can\'t be topped up.'
+                    : ($multi ? 'Pre-filled with your share of what\'s still needed (your pledge is ' . round($myShare * 100) . '% of all pledges). '
+                              : 'Pre-filled with what\'s still needed. ')
+                      . 'If above 0, you\'ll get an M-Pesa prompt after approving. Set 0 to approve without topping up.' ?>
               </p>
 
               <div>
@@ -183,6 +240,7 @@ $active = 'proposals';
                 <button type="submit" name="decision" value="changes" class="btn btn-outline">Request changes</button>
               </div>
             </form>
+            <?php endif; ?>
           </div>
         </section>
       <?php endforeach; ?>
@@ -194,12 +252,13 @@ $active = 'proposals';
         <?php else: ?>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Student</th><th>Reviewed</th><th>Decision</th><th>Feedback</th><th class="num">Total (KES)</th></tr></thead>
+              <thead><tr><th>Student</th><th>Decided</th><th>Decision</th><th>Feedback</th><th class="num">Total (KES)</th></tr></thead>
               <tbody>
                 <?php foreach ($reviewed as $r): [$label, $color] = $statusPill[$r['status']] ?? [ucfirst($r['status']), 'amber']; ?>
                   <tr>
                     <td><?= htmlspecialchars($r['student_name']) ?></td>
-                    <td><?= $r['reviewed_at'] ? htmlspecialchars(date('j M Y', strtotime($r['reviewed_at']))) : '' ?></td>
+                    <td><?= $r['reviewed_at'] ? htmlspecialchars(date('j M Y', strtotime($r['reviewed_at']))) : '' ?>
+                      <?php if ($r['reviewer_name']): ?><div class="muted small">by <?= (int) $r['reviewed_by'] === $sponsorId ? 'you' : htmlspecialchars($r['reviewer_name']) ?></div><?php endif; ?></td>
                     <td><span class="pill <?= $color ?>"><?= $label ?></span></td>
                     <td class="wrap muted"><?= htmlspecialchars($r['sponsor_feedback'] ?? '') ?></td>
                     <td class="num"><?= kes2($r['total']) ?></td>

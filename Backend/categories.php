@@ -4,7 +4,7 @@
 //
 // budget_categories()            -> standard + ALL custom categories (use this for showing names)
 // budget_categories($walletId)   -> standard + only that student's custom categories (use this for forms)
-// sponsor_categories($sponsorId) -> standard + custom categories of that sponsor's students (for filters)
+// sponsor_categories($sponsorId) -> standard + custom categories of the students that sponsor actively sponsors
 //
 // Custom categories are stored in the custom_categories table and use the code "c" + id (e.g. "c7"),
 // so they never clash with the standard codes below.
@@ -60,7 +60,8 @@ function sponsor_categories(int $sponsorId): array
         $stmt = $conn->prepare(
             'SELECT c.id, c.name FROM custom_categories c
              JOIN wallets w ON w.id = c.wallet_id
-             WHERE w.sponsor_id = ? ORDER BY c.name'
+             JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = \'active\'
+             WHERE sp.sponsor_id = ? ORDER BY c.name'
         );
         $stmt->bind_param('i', $sponsorId);
         $stmt->execute();

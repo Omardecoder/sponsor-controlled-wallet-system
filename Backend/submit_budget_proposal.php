@@ -1,16 +1,17 @@
 <?php
 // Backend/submit_budget_proposal.php
-// Saves a student's budget proposal for sponsor review.
+// Saves a student's budget proposal for review by ALL of the student's active sponsors.
 //
-// The proposal goes to the sponsor who owns the student's wallet (wallets.sponsor_id).
-// It MAY be more than the wallet balance: the sponsor adds the money when approving.
-// Only one proposal can wait for the sponsor at a time.
+// The total can't be more than the sponsors' pledges added together.
+// It MAY be more than the wallet balance: the sponsors add the money when approving.
+// Only one proposal can wait for review at a time.
 
 session_start();
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/sponsorship.php';
 
 require_role('student');
 
@@ -62,6 +63,16 @@ if ($totalCents <= 0) {
     back('error', 'Enter an amount for at least one category.');
 }
 
+// The budget can't be more than what the sponsors pledged together
+$pledgedCents = (int) round(pledge_total($conn, $studentId) * 100);
+if ($pledgedCents <= 0) {
+    back('error', 'You have no active sponsor yet. Accept a sponsor\'s request on your dashboard first.');
+}
+if ($totalCents > $pledgedCents) {
+    back('error', 'Your budget (KSh ' . number_format($totalCents / 100) . ') is more than your sponsors pledged (KSh '
+        . number_format($pledgedCents / 100) . '). Lower some amounts and submit again.');
+}
+
 try {
     $conn->begin_transaction();
 
@@ -92,7 +103,7 @@ try {
 
     if ($alreadyPending) {
         $conn->rollback();
-        back('error', 'You already have a proposal waiting for your sponsor. Wait for their decision before sending another.');
+        back('error', 'You already have a proposal waiting for your sponsors. Wait for their decision before sending another.');
     }
 
     // Create the proposal as pending sponsor review.
@@ -119,19 +130,13 @@ try {
     back('error', 'The proposal could not be saved. Please try again.');
 }
 
-// ---- Alert the sponsor that a budget is waiting ----
-require_once __DIR__ . '/notify.php';
-$stmt = $conn->prepare('SELECT sponsor_id FROM wallets WHERE id = ?');
-$stmt->bind_param('i', $walletId);
-$stmt->execute();
-$sponsorIdForAlert = (int) ($stmt->get_result()->fetch_assoc()['sponsor_id'] ?? 0);
-$stmt->close();
-if ($sponsorIdForAlert) {
-    notify(
-        $conn, $sponsorIdForAlert, 'proposal_submitted',
-        $_SESSION['full_name'] . ' submitted a budget',
-        'KSh ' . number_format($totalCents / 100) . ' across ' . count($items) . ' categories, waiting for your approval.',
-        'sponsor-proposals.php'
-    );
-}
-back('success', 'Your budget proposal has been sent to your sponsor for review.');
+// ---- Alert every active sponsor that a budget is waiting ----
+$sponsorCount = count(student_sponsors($conn, $studentId));
+notify_sponsors(
+    $conn, $studentId, 'proposal_submitted',
+    $_SESSION['full_name'] . ' submitted a budget',
+    'KSh ' . number_format($totalCents / 100) . ' across ' . count($items) . ' categories, waiting for your approval'
+        . ($sponsorCount > 1 ? ' (every sponsor must approve).' : '.'),
+    'sponsor-proposals.php'
+);
+back('success', 'Your budget proposal has been sent to your sponsor' . ($sponsorCount > 1 ? 's' : '') . ' for review.');

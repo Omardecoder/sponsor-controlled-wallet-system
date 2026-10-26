@@ -3,21 +3,24 @@
 // The sponsor sidebar, shared by every sponsor page.
 //
 // Before including it, a page sets which link is highlighted:
-//     $active = 'dashboard';   // or 'students', 'send', 'proposals', 'funding', 'spending'
+//     $active = 'dashboard';   // or 'alerts', 'students', 'send', 'proposals', 'funding', 'spending', 'reports'
 //
-// It also sets $pendingCount (proposals waiting for this sponsor)
+// It also sets $pendingCount (proposals waiting for this sponsor's decision), $alertCount (unread alerts)
 // and the sw_icon() function, so the page can use both after the include.
 
 require_once __DIR__ . '/../../Backend/notify.php';
 
 $active = $active ?? '';
 
-// Proposals waiting for this sponsor (shown as a badge)
+// Proposals waiting for THIS sponsor's decision (shown as a badge):
+// pending, on a student they actively sponsor, and not yet reviewed by them
 $stmt = $conn->prepare(
     "SELECT COUNT(*) AS n
      FROM budget_proposals p
      JOIN wallets w ON w.id = p.wallet_id
-     WHERE w.sponsor_id = ? AND p.status = 'pending'"
+     JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.sponsor_id = ? AND sp.status = 'active'
+     LEFT JOIN proposal_reviews r ON r.proposal_id = p.id AND r.sponsor_id = sp.sponsor_id
+     WHERE p.status = 'pending' AND r.id IS NULL"
 );
 $sidebarSponsorId = (int) $_SESSION['user_id'];
 $stmt->bind_param('i', $sidebarSponsorId);

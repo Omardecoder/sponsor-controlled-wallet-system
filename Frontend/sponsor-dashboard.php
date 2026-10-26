@@ -1,54 +1,70 @@
 <?php
 // Frontend/sponsor-dashboard.php
-// Sponsor overview: totals, budget usage, recent transactions, send funds, students.
+// Sponsor overview: totals, budget usage, send funds, recent transactions, students and pledges.
+// A student can have several sponsors: this page shows only the students THIS sponsor supports.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
+require_once __DIR__ . '/../Backend/sponsorship.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
 
-// One-time message from create_wallet.php / fund_wallet.php
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
-// ---- This sponsor's students (one wallet each) ----
+// ---- My students: active sponsorships and requests still waiting for the student ----
 $stmt = $conn->prepare(
-    'SELECT w.id, w.balance, w.status, u.full_name, u.email, u.phone
-     FROM wallets w
-     JOIN users u ON u.id = w.student_id
-     WHERE w.sponsor_id = ?
-     ORDER BY u.full_name'
+    "SELECT sp.id AS sponsorship_id, sp.status AS link_status, sp.pledge, sp.created_at AS asked_at,
+            u.id AS student_id, u.full_name, u.email, u.phone,
+            w.id, w.balance, w.status,
+            (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
+              WHERE t.wallet_id = w.id AND t.type = 'funding' AND t.created_by = sp.sponsor_id) AS my_funded,
+            (SELECT GROUP_CONCAT(ou.full_name ORDER BY o.created_at SEPARATOR ', ')
+               FROM sponsorships o JOIN users ou ON ou.id = o.sponsor_id
+              WHERE o.student_id = sp.student_id AND o.status = 'active' AND o.sponsor_id <> sp.sponsor_id) AS co_sponsors
+     FROM sponsorships sp
+     JOIN users u ON u.id = sp.student_id
+     LEFT JOIN wallets w ON w.student_id = sp.student_id
+     WHERE sp.sponsor_id = ? AND sp.status IN ('active', 'pending')
+     ORDER BY sp.status = 'pending', u.full_name"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
-$wallets = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$students = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+// Students whose wallet this sponsor can fund (accepted, wallet exists)
+$wallets = array_values(array_filter($students, fn($s) => $s['link_status'] === 'active' && $s['id'] !== null));
+
 // ---- Summary figures ----
+// Funds sent = what THIS sponsor sent. Spending = by the students this sponsor supports.
 $stmt = $conn->prepare(
     "SELECT
-        COALESCE(SUM(CASE WHEN t.type = 'funding'  THEN t.amount END), 0) AS funded,
+        (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
+          WHERE t.type = 'funding' AND t.created_by = ?) AS funded,
         COALESCE(SUM(CASE WHEN t.type = 'spending' THEN t.amount END), 0) AS spent,
         COALESCE(SUM(t.created_at >= NOW() - INTERVAL 30 DAY), 0)         AS recent_count
      FROM transactions t
      JOIN wallets w ON w.id = t.wallet_id
-     WHERE w.sponsor_id = ?"
+     JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = 'active'
+     WHERE sp.sponsor_id = ?"
 );
-$stmt->bind_param('i', $sponsorId);
+$stmt->bind_param('ii', $sponsorId, $sponsorId);
 $stmt->execute();
 $totals = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 // ---- Budget overview: approved allocations vs spending, per category ----
 $stmt = $conn->prepare(
-    'SELECT a.category, SUM(a.allocated) AS allocated, SUM(a.spent) AS spent
+    "SELECT a.category, SUM(a.allocated) AS allocated, SUM(a.spent) AS spent
      FROM budget_allocations a
      JOIN wallets w ON w.id = a.wallet_id
-     WHERE w.sponsor_id = ?
+     JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = 'active'
+     WHERE sp.sponsor_id = ?
      GROUP BY a.category
-     ORDER BY allocated DESC'
+     ORDER BY allocated DESC"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
@@ -56,15 +72,17 @@ $budgetRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 $categoryLabels = budget_categories();   // slug => label
 
-// ---- Recent transactions ----
+// ---- Recent transactions on my students' wallets (from any of their sponsors) ----
 $stmt = $conn->prepare(
-    'SELECT t.type, t.amount, t.description, t.created_at, u.full_name
+    "SELECT t.type, t.amount, t.description, t.created_at, t.created_by, u.full_name, c.full_name AS by_name
      FROM transactions t
      JOIN wallets w ON w.id = t.wallet_id
-     JOIN users u   ON u.id = w.student_id
-     WHERE w.sponsor_id = ?
+     JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = 'active'
+     JOIN users u ON u.id = w.student_id
+     JOIN users c ON c.id = t.created_by
+     WHERE sp.sponsor_id = ?
      ORDER BY t.created_at DESC, t.id DESC
-     LIMIT 8'
+     LIMIT 8"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
@@ -146,13 +164,14 @@ $active = 'dashboard';
       <section class="stats" aria-label="Summary">
         <div class="card stat">
           <div class="stat-icon"><?= sw_icon('send') ?></div>
-          <div class="stat-label">Total Funds Sent</div>
+          <div class="stat-label">Funds You Sent</div>
           <div class="stat-value"><?= kes($totals['funded']) ?></div>
         </div>
         <div class="card stat">
           <div class="stat-icon"><?= sw_icon('students') ?></div>
           <div class="stat-label">Students Sponsored</div>
           <div class="stat-value"><?= count($wallets) ?></div>
+          <?php $waiting = count($students) - count($wallets); if ($waiting > 0): ?><div class="stat-note"><?= $waiting ?> request<?= $waiting === 1 ? '' : 's' ?> waiting</div><?php endif; ?>
         </div>
         <div class="card stat">
           <div class="stat-icon"><?= sw_icon('activity') ?></div>
@@ -201,25 +220,24 @@ $active = 'dashboard';
 
         <!-- Send funds -->
         <section class="card" id="send-funds">
-                    <div class="card-head"><h3>Send funds</h3><span class="mpesa-tag">M-PESA</span></div>
+          <div class="card-head"><h3>Send funds</h3><span class="mpesa-tag">M-PESA</span></div>
           <?php if (!$wallets): ?>
-            <p class="empty">Add a student below before sending funds.</p>
+            <p class="empty">Once a student accepts your sponsorship, you can send them funds here.</p>
           <?php else: ?>
-                        <form action="../Backend/mpesa_fund.php" method="post" class="form-grid">
+            <form action="../Backend/mpesa_fund.php" method="post" class="form-grid">
               <div>
                 <label for="wallet_id">Student</label>
                 <select id="wallet_id" name="wallet_id" required>
-                <option value="" selected disabled>Choose a student…</option>
-                  <?php foreach ($wallets as $w): ?>
-                    <option value="<?= (int) $w['id'] ?>" <?= $w['status'] !== 'active' ? 'disabled' : '' ?>>
-                      <?= htmlspecialchars($w['full_name']) ?> — balance KES <?= kes2($w['balance']) ?><?= $w['status'] !== 'active' ? ' (frozen)' : '' ?>
+                  <option value="" selected disabled>Choose a student…</option>
+                  <?php foreach ($wallets as $w):
+                      $left = max(0, (float) $w['pledge'] - (float) $w['my_funded']);
+                      $can  = $w['status'] === 'active' && $left >= 1;
+                  ?>
+                    <option value="<?= (int) $w['id'] ?>" <?= $can ? '' : 'disabled' ?>>
+                      <?= htmlspecialchars($w['full_name']) ?> — <?= $w['status'] !== 'active' ? 'frozen' : 'KES ' . number_format($left) . ' left of your pledge' ?>
                     </option>
                   <?php endforeach; ?>
                 </select>
-              </div>
-              <div>
-                <label for="amount">Amount (KES)</label>
-                <input type="number" id="amount" name="amount" min="1" step="0.01" placeholder="e.g. 5000" required>
               </div>
               <div>
                 <label for="amount">Amount (KES)</label>
@@ -229,8 +247,12 @@ $active = 'dashboard';
                 <label for="phone">Pay from M-Pesa number</label>
                 <input type="tel" id="phone" name="phone" required placeholder="0712 345 678" value="<?= htmlspecialchars($sponsorPhone) ?>">
               </div>
+              <div>
+                <label for="note">Note (optional)</label>
+                <input type="text" id="note" name="note" maxlength="255" placeholder="e.g. Term 2 upkeep">
+              </div>
               <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Pay with M-Pesa</button>
-              <p class="muted small">You'll get an M-Pesa prompt on this phone. The wallet is credited only after M-Pesa confirms the payment.</p>
+              <p class="muted small">You can send up to your pledge for each student. You'll get an M-Pesa prompt on this phone; the wallet is credited only after M-Pesa confirms.</p>
             </form>
           <?php endif; ?>
         </section>
@@ -248,11 +270,14 @@ $active = 'dashboard';
                 <tr><th>Date</th><th>Student</th><th>Details</th><th>Type</th><th class="num">Amount (KES)</th></tr>
               </thead>
               <tbody>
-                <?php foreach ($recent as $t): $in = $t['type'] === 'funding'; ?>
+                <?php foreach ($recent as $t):
+                    $in = $t['type'] === 'funding';
+                    $by = $in ? ((int) $t['created_by'] === $sponsorId ? 'You' : $t['by_name']) : null;
+                ?>
                   <tr>
                     <td><?= htmlspecialchars(date('j M Y, H:i', strtotime($t['created_at']))) ?></td>
                     <td><?= htmlspecialchars($t['full_name']) ?></td>
-                    <td class="wrap"><?= htmlspecialchars($t['description'] ?? '') ?></td>
+                    <td class="wrap"><?= htmlspecialchars($t['description'] ?? '') ?><?= $by ? '<br><span class="muted small">Sent by ' . htmlspecialchars($by) . '</span>' : '' ?></td>
                     <td><span class="pill <?= $in ? 'green' : 'amber' ?>"><?= $in ? 'Funding' : 'Spending' ?></span></td>
                     <td class="num <?= $in ? 'amount-in' : 'amount-out' ?>"><?= $in ? '+' : '−' ?><?= kes2($t['amount']) ?></td>
                   </tr>
@@ -267,32 +292,65 @@ $active = 'dashboard';
       <section class="card" id="students">
         <div class="card-head"><h3>My students</h3></div>
 
-        <form action="../Backend/create_wallet.php" method="post">
-          <div class="row">
-            <div>
-              <label for="student_identifier">Add a student by email or phone number</label>
-              <input type="text" id="student_identifier" name="student_identifier" placeholder="student@example.com or 0712 345 678" required>
-            </div>
-            <button type="submit" class="btn">Add student</button>
+        <form action="../Backend/sponsorship_action.php" method="post" class="sponsor-request">
+          <input type="hidden" name="action" value="request">
+          <div>
+            <label for="student_identifier">Student's email or phone</label>
+            <input type="text" id="student_identifier" name="student_identifier" placeholder="student@example.com or 0712 345 678" required>
           </div>
-          <p class="muted small" style="margin-top:6px;">The student must already have a Student account. This creates their wallet and links them to you.</p>
+          <div>
+            <label for="pledge">Your pledge (KES)</label>
+            <input type="number" id="pledge" name="pledge" min="1" step="1" placeholder="e.g. 60000" required>
+          </div>
+          <div>
+            <label for="message">Message (optional)</label>
+            <input type="text" id="message" name="message" maxlength="255" placeholder="e.g. Your upkeep for this semester">
+          </div>
+          <button type="submit" class="btn">Send request</button>
         </form>
+        <p class="muted small" style="margin-top:6px;">Your pledge is the most you will give this student. Their budget can't be more than the total of all their sponsors' pledges. The student must accept before you are linked.</p>
 
-        <?php if (!$wallets): ?>
+        <?php if (!$students): ?>
           <p class="empty" style="margin-top:14px;">No students yet.</p>
         <?php else: ?>
           <div class="table-wrap" style="margin-top:18px;">
             <table>
               <thead>
-                <tr><th>Student</th><th>Contact</th><th>Status</th><th class="num">Balance (KES)</th></tr>
+                <tr><th>Student</th><th>Status</th><th class="num">Your pledge (KES)</th><th class="num">You sent</th><th class="num">Balance</th><th>Pledge</th></tr>
               </thead>
               <tbody>
-                <?php foreach ($wallets as $w): ?>
+                <?php foreach ($students as $s): $isActive = $s['link_status'] === 'active'; ?>
                   <tr>
-                    <td><strong><?= htmlspecialchars($w['full_name']) ?></strong></td>
-                    <td class="muted"><?= htmlspecialchars($w['email']) ?><br><?= htmlspecialchars($w['phone']) ?></td>
-                    <td><span class="pill <?= $w['status'] === 'active' ? 'green' : 'red' ?>"><?= htmlspecialchars(ucfirst($w['status'])) ?></span></td>
-                    <td class="num"><strong><?= kes2($w['balance']) ?></strong></td>
+                    <td>
+                      <strong><?= htmlspecialchars($s['full_name']) ?></strong>
+                      <div class="muted small"><?= htmlspecialchars($s['email']) ?> · <?= htmlspecialchars($s['phone']) ?></div>
+                      <?php if ($s['co_sponsors']): ?><div class="muted small">Also sponsored by <?= htmlspecialchars($s['co_sponsors']) ?></div><?php endif; ?>
+                    </td>
+                    <td>
+                      <?php if (!$isActive): ?>
+                        <span class="pill amber">Waiting for student</span>
+                      <?php else: ?>
+                        <span class="pill <?= $s['status'] === 'active' ? 'green' : 'red' ?>"><?= $s['status'] === 'active' ? 'Active' : 'Frozen' ?></span>
+                      <?php endif; ?>
+                    </td>
+                    <td class="num"><strong><?= kes2($s['pledge']) ?></strong></td>
+                    <td class="num"><?= $isActive ? kes2($s['my_funded']) : '—' ?></td>
+                    <td class="num"><?= $isActive && $s['id'] !== null ? kes2($s['balance']) : '—' ?></td>
+                    <td>
+                      <form action="../Backend/sponsorship_action.php" method="post" class="inline-action">
+                        <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
+                        <input type="hidden" name="action" value="pledge">
+                        <input type="number" name="pledge" min="1" step="1" value="<?= (int) round((float) $s['pledge']) ?>" aria-label="New pledge for <?= htmlspecialchars($s['full_name']) ?>" class="pledge-input">
+                        <button type="submit" class="btn btn-outline btn-sm">Save</button>
+                      </form>
+                      <?php if (!$isActive): ?>
+                        <form action="../Backend/sponsorship_action.php" method="post" class="inline-action" onsubmit="return confirm('Cancel your request to <?= htmlspecialchars(addslashes($s['full_name'])) ?>?');">
+                          <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
+                          <input type="hidden" name="action" value="cancel">
+                          <button type="submit" class="link-btn">Cancel request</button>
+                        </form>
+                      <?php endif; ?>
+                    </td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>

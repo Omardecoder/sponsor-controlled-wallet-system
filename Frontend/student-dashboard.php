@@ -1,10 +1,12 @@
 <?php
 // Frontend/student-dashboard.php
-// Student overview: balance, funds received, spending, approved budget, transactions.
+// Student overview: sponsor requests, sponsors and pledges, balance, budget, transactions.
+// A student can have several sponsors; they all pay into this one wallet.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
+require_once __DIR__ . '/../Backend/sponsorship.php';
 require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
@@ -12,20 +14,22 @@ $studentId = (int) $_SESSION['user_id'];
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
-// ---- The student's wallet and the sponsor linked to it ----
-$stmt = $conn->prepare(
-    'SELECT w.id, w.balance, w.status, s.full_name AS sponsor_name
-     FROM wallets w
-     JOIN users s ON s.id = w.sponsor_id
-     WHERE w.student_id = ?
-     LIMIT 1'
-);
+// ---- The student's wallet (created when they accept their first sponsor) ----
+$stmt = $conn->prepare('SELECT id, balance, status FROM wallets WHERE student_id = ? LIMIT 1');
 $stmt->bind_param('i', $studentId);
 $stmt->execute();
 $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
+// ---- Sponsors: accepted ones, and requests waiting for an answer ----
+$allLinks  = student_sponsors($conn, $studentId, false);
+$sponsors  = array_values(array_filter($allLinks, fn($s) => $s['status'] === 'active'));
+$requests  = array_values(array_filter($allLinks, fn($s) => $s['status'] === 'pending'));
+$pledged   = array_sum(array_column($sponsors, 'pledge'));
+$sponsorNames = implode(' & ', array_column($sponsors, 'full_name'));
+
 $totals     = ['received' => 0, 'spent' => 0];
+$approvals  = null;
 $budgetRows = [];
 $proposal   = null;
 $recent     = [];
@@ -60,14 +64,13 @@ if ($wallet) {
     $budgetRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 
-    // Latest budget proposal and the sponsor's decision
+    // Latest budget proposal, who asked for changes, and who has approved so far
     $stmt = $conn->prepare(
-        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at,
-                COALESCE(SUM(i.proposed_amount), 0) AS total
+        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at, r.full_name AS reviewer_name,
+                (SELECT COALESCE(SUM(i.proposed_amount), 0) FROM budget_proposal_items i WHERE i.proposal_id = p.id) AS total
          FROM budget_proposals p
-         LEFT JOIN budget_proposal_items i ON i.proposal_id = p.id
+         LEFT JOIN users r ON r.id = p.reviewed_by
          WHERE p.wallet_id = ?
-         GROUP BY p.id
          ORDER BY p.id DESC
          LIMIT 1'
     );
@@ -75,12 +78,16 @@ if ($wallet) {
     $stmt->execute();
     $proposal = $stmt->get_result()->fetch_assoc();
     $stmt->close();
+    if ($proposal && $proposal['status'] === 'pending') {
+        $approvals = proposal_approvals($conn, (int) $proposal['id'], $studentId);
+    }
 
     // Recent transactions
-    $sql = 'SELECT type, amount, balance_after, description, created_at
-            FROM transactions WHERE wallet_id = ?'
-         . ($txFilter !== 'all' ? ' AND type = ?' : '')
-         . ' ORDER BY created_at DESC, id DESC LIMIT 15';
+    $sql = 'SELECT t.type, t.amount, t.balance_after, t.description, t.created_at, u.full_name AS by_name
+            FROM transactions t JOIN users u ON u.id = t.created_by
+            WHERE t.wallet_id = ?'
+         . ($txFilter !== 'all' ? ' AND t.type = ?' : '')
+         . ' ORDER BY t.created_at DESC, t.id DESC LIMIT 15';
     $stmt = $conn->prepare($sql);
     if ($txFilter !== 'all') {
         $stmt->bind_param('is', $walletId, $txFilter);
@@ -143,10 +150,10 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
           <h2>Welcome back, <?= htmlspecialchars($firstName) ?>!</h2>
           <p>Manage your funds and stay on top of your budget.</p>
         </div>
-        <?php if ($wallet): ?>
+        <?php if ($wallet && $sponsors): ?>
           <div class="hero-side">
             <span>Sponsored by</span>
-            <strong><?= htmlspecialchars($wallet['sponsor_name']) ?></strong>
+            <strong><?= htmlspecialchars($sponsorNames) ?></strong>
             <?php if ($wallet['status'] !== 'active'): ?><span class="pill red">Wallet frozen</span><?php endif; ?>
           </div>
         <?php endif; ?>
@@ -156,10 +163,39 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
         <div class="alert <?= $flash['type'] === 'success' ? 'success' : 'error' ?>" role="status"><?= htmlspecialchars($flash['message']) ?></div>
       <?php endif; ?>
 
-      <?php if (!$wallet): ?>
+      <?php if ($requests): ?>
+        <!-- Sponsorship requests waiting for an answer -->
+        <section class="card requests" id="requests">
+          <div class="card-head"><h3>Sponsorship request<?= count($requests) === 1 ? '' : 's' ?></h3></div>
+          <?php foreach ($requests as $r): ?>
+            <div class="request-row">
+              <div>
+                <strong><?= htmlspecialchars($r['full_name']) ?></strong> wants to sponsor you with up to <strong><?= ksh($r['pledge']) ?></strong>.
+                <?php if ($r['message']): ?><div class="muted">“<?= htmlspecialchars($r['message']) ?>”</div><?php endif; ?>
+                <div class="muted small">If you accept, they can see your wallet and spending, and must approve your budgets.</div>
+              </div>
+              <div class="row">
+                <form action="../Backend/respond_sponsorship.php" method="post" class="inline-action">
+                  <input type="hidden" name="sponsorship_id" value="<?= (int) $r['id'] ?>">
+                  <input type="hidden" name="decision" value="accept">
+                  <button type="submit" class="btn">Accept</button>
+                </form>
+                <form action="../Backend/respond_sponsorship.php" method="post" class="inline-action"
+                      onsubmit="return confirm('Decline the request from <?= htmlspecialchars(addslashes($r['full_name'])) ?>?');">
+                  <input type="hidden" name="sponsorship_id" value="<?= (int) $r['id'] ?>">
+                  <input type="hidden" name="decision" value="decline">
+                  <button type="submit" class="btn btn-outline">Decline</button>
+                </form>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </section>
+      <?php endif; ?>
+
+      <?php if (!$wallet || !$sponsors): ?>
         <section class="card">
           <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
-          <p class="muted">Ask your sponsor to add you from their dashboard using the email or phone number you registered with. Once they do, your wallet and budget tools appear here.</p>
+          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with. Once you accept their request, your wallet and budget tools appear here.</p>
         </section>
 
       <?php else: ?>
@@ -167,13 +203,16 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
         <?php // Status of the latest budget proposal ?>
         <?php if ($proposal && $proposal['status'] === 'pending'): ?>
           <div class="notice">
-            <span>Your budget proposal of <strong><?= ksh($proposal['total']) ?></strong> is waiting for <?= htmlspecialchars($wallet['sponsor_name']) ?> to approve it.</span>
+            <?php $waitingFor = array_column(array_filter($approvals['sponsors'], fn($s) => $s['decision'] !== 'approved'), 'full_name'); ?>
+            <span>Your budget proposal of <strong><?= ksh($proposal['total']) ?></strong> is waiting for approval
+              <?php if ($approvals['needed'] > 1): ?>(<?= $approvals['approved'] ?> of <?= $approvals['needed'] ?> sponsors approved)<?php endif; ?>.
+              <?php if ($waitingFor): ?><br><span class="muted">Waiting for <?= htmlspecialchars(implode(', ', $waitingFor)) ?>.</span><?php endif; ?></span>
             <a class="btn btn-accent" href="student-budget.php">View</a>
           </div>
         <?php elseif ($proposal && $proposal['status'] === 'changes_requested'): ?>
           <div class="notice">
             <span>
-              <strong><?= htmlspecialchars($wallet['sponsor_name']) ?> asked for changes to your budget.</strong>
+              <strong><?= htmlspecialchars($proposal['reviewer_name'] ?? 'Your sponsor') ?> asked for changes to your budget.</strong>
               <?php if ($proposal['sponsor_feedback']): ?><br><span class="muted">“<?= htmlspecialchars($proposal['sponsor_feedback']) ?>”</span><?php endif; ?>
             </span>
             <a class="btn btn-accent" href="student-budget.php">Update budget</a>
@@ -205,6 +244,32 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
           </div>
         </section>
 
+        <!-- My sponsors and their pledges -->
+        <section class="card" id="sponsors">
+          <div class="card-head">
+            <h3>My sponsors</h3>
+            <span class="muted small">Your budget can total up to <?= ksh($pledged) ?></span>
+          </div>
+          <div class="bars">
+            <?php foreach ($sponsors as $s):
+                $pledge = (float) $s['pledge'];
+                $sent   = (float) $s['funded'];
+                $pct    = $pledge > 0 ? min(100, round($sent / $pledge * 100)) : 0;
+            ?>
+              <div>
+                <div class="bar-top">
+                  <b><?= htmlspecialchars($s['full_name']) ?></b>
+                  <span><?= ksh($sent) ?> sent of <?= ksh($pledge) ?> pledged</span>
+                </div>
+                <div class="bar-track" role="img" aria-label="<?= $pct ?>% of pledge sent">
+                  <div class="bar-fill" style="width: <?= $pct ?>%"></div>
+                </div>
+                <div class="bar-sub"><?= $pledged > 0 ? round($pledge / $pledged * 100) : 0 ?>% of your total support</div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </section>
+
         <div class="grid-2">
           <!-- My budget -->
           <section class="card">
@@ -215,9 +280,9 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
             <?php if (!$budgetRows): ?>
               <p class="empty">
                 <?php if ($proposal && $proposal['status'] === 'pending'): ?>
-                  Your budget lines will appear here once your sponsor approves your proposal.
+                  Your budget lines will appear here once your sponsors approve your proposal.
                 <?php else: ?>
-                  You don't have an approved budget yet. Create one and send it to your sponsor.
+                  You don't have an approved budget yet. Create one and send it to your sponsors.
                 <?php endif; ?>
               </p>
             <?php else: ?>
@@ -267,7 +332,7 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
           </div>
           <?php if (!$recent): ?>
             <p class="empty">
-              <?= $txFilter === 'spending' ? 'No spending recorded yet.' : ($txFilter === 'funding' ? 'No funds received yet.' : 'No transactions yet. Funds your sponsor sends will appear here.') ?>
+              <?= $txFilter === 'spending' ? 'No spending recorded yet.' : ($txFilter === 'funding' ? 'No funds received yet.' : 'No transactions yet. Funds your sponsors send will appear here.') ?>
             </p>
           <?php else: ?>
             <div class="table-wrap">
@@ -279,7 +344,7 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
                   <?php foreach ($recent as $t): $in = $t['type'] === 'funding'; ?>
                     <tr>
                       <td><?= htmlspecialchars(date('j M Y, H:i', strtotime($t['created_at']))) ?></td>
-                      <td class="wrap"><?= htmlspecialchars($t['description'] ?? '') ?></td>
+                      <td class="wrap"><?= htmlspecialchars($t['description'] ?? '') ?><?= $in ? '<br><span class="muted small">From ' . htmlspecialchars($t['by_name']) . '</span>' : '' ?></td>
                       <td><span class="pill <?= $in ? 'green' : 'amber' ?>"><?= $in ? 'Received' : 'Spent' ?></span></td>
                       <td class="num <?= $in ? 'amount-in' : 'amount-out' ?>"><?= $in ? '+' : '−' ?><?= ksh2($t['amount']) ?></td>
                       <td class="num"><?= ksh2($t['balance_after']) ?></td>

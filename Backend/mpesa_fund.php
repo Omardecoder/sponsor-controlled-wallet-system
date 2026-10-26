@@ -7,6 +7,7 @@ session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/mpesa_funding.php';
+require_once __DIR__ . '/sponsorship.php';
 require_role('sponsor');
 
 function back(string $type, string $message): void
@@ -41,18 +42,21 @@ if (mb_strlen($note) > 255) {
     back('error', 'The note must be 255 characters or fewer.');
 }
 
-// The wallet must be this sponsor's and active
-$stmt = $conn->prepare('SELECT id, status FROM wallets WHERE id = ? AND sponsor_id = ?');
-$stmt->bind_param('ii', $walletId, $sponsorId);
-$stmt->execute();
-$wallet = $stmt->get_result()->fetch_assoc();
-$stmt->close();
+// The wallet must belong to a student this sponsor actively sponsors, and be active
+$wallet = sponsor_wallet($conn, $sponsorId, $walletId);
 
 if (!$wallet) {
     back('error', 'Choose a student to fund.');
 }
 if ($wallet['status'] !== 'active') {
     back('error', 'This wallet is frozen and cannot be funded.');
+}
+
+// A sponsor can send up to their pledge for this student
+$left = (float) $wallet['pledge'] - sponsor_pledge_used($conn, $sponsorId, $walletId);
+if ($amount > $left) {
+    back('error', 'That is more than what is left of your pledge for ' . $wallet['student_name'] . ' (KSh ' . number_format(max(0, $left))
+        . '). Raise your pledge under My Students first, or send a smaller amount.');
 }
 
 try {

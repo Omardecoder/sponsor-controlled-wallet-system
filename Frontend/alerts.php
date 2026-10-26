@@ -38,6 +38,11 @@ function alert_style(string $type): array
     return match (true) {
         str_starts_with($type, 'proposal')     => ['proposals', 'tone-info'],
         $type === 'budget_approved'            => ['proposals', 'tone-good'],
+        $type === 'budget_partly_approved'     => ['proposals', 'tone-info'],
+        $type === 'sponsorship_declined'       => ['students',  'tone-warn'],
+        str_starts_with($type, 'sponsorship'),
+        $type === 'co_sponsor_joined',
+        $type === 'pledge_changed'             => ['students',  'tone-info'],
         $type === 'budget_changes'             => ['pen',       'tone-warn'],
         str_starts_with($type, 'funds')        => ['received',  'tone-good'],
         $type === 'payment_failed'             => ['send',      'tone-bad'],

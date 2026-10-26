@@ -12,9 +12,9 @@ $labels    = budget_categories();   // slug => label
 
 // This sponsor's students, for the filter
 $stmt = $conn->prepare(
-    'SELECT w.id, u.full_name
+    "SELECT w.id, u.full_name
      FROM wallets w JOIN users u ON u.id = w.student_id
-     WHERE w.sponsor_id = ? ORDER BY u.full_name'
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') ORDER BY u.full_name"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
@@ -28,7 +28,7 @@ $catFilter     = array_key_exists($_GET['cat'] ?? '', $labels) ? $_GET['cat'] : 
 $receiptFilter = in_array($_GET['receipt'] ?? '', ['with', 'without'], true) ? $_GET['receipt'] : '';
 
 // Build the query with only the filters that are set
-$where  = ['w.sponsor_id = ?'];
+$where  = ["EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active')"];   // students this sponsor actively sponsors
 $types  = 'i';
 $params = [$sponsorId];
 if ($walletFilter) { $where[] = 'e.wallet_id = ?'; $types .= 'i'; $params[] = $walletFilter; }

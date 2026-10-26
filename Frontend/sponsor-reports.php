@@ -7,6 +7,7 @@ require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
 require_role('sponsor');
+// Only students this sponsor actively sponsors (a student can have several sponsors)
 
 $sponsorId = (int) $_SESSION['user_id'];
 $labels    = budget_categories();
@@ -44,8 +45,8 @@ $toTs   = $to . ' 23:59:59';
 
 // ---------- Students (for the filter) ----------
 $stmt = $conn->prepare(
-    'SELECT w.id, u.full_name, w.balance FROM wallets w JOIN users u ON u.id = w.student_id
-     WHERE w.sponsor_id = ? ORDER BY u.full_name'
+    "SELECT w.id, u.full_name, w.balance FROM wallets w JOIN users u ON u.id = w.student_id
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') ORDER BY u.full_name"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
@@ -63,6 +64,8 @@ $stmt = $conn->prepare(
     "SELECT w.id, u.full_name, w.balance, w.status,
             (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
               WHERE t.wallet_id = w.id AND t.type = 'funding' AND t.created_at BETWEEN ? AND ?) AS funded,
+            (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
+              WHERE t.wallet_id = w.id AND t.type = 'funding' AND t.created_by = ? AND t.created_at BETWEEN ? AND ?) AS my_funded,
             (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e
               WHERE e.wallet_id = w.id AND e.expense_date BETWEEN ? AND ?) AS spent,
             (SELECT COUNT(*) FROM expenses e
@@ -70,10 +73,10 @@ $stmt = $conn->prepare(
             (SELECT COUNT(*) FROM expenses e
               WHERE e.wallet_id = w.id AND e.expense_date BETWEEN ? AND ? AND e.receipt_file IS NOT NULL) AS n_receipts
      FROM wallets w JOIN users u ON u.id = w.student_id
-     WHERE w.sponsor_id = ? $walletSql
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') $walletSql
      ORDER BY u.full_name"
 );
-$stmt->bind_param('ssssssssi', $fromTs, $toTs, $from, $to, $from, $to, $from, $to, $sponsorId);
+$stmt->bind_param('ssissssssssi', $fromTs, $toTs, $sponsorId, $fromTs, $toTs, $from, $to, $from, $to, $from, $to, $sponsorId);
 $stmt->execute();
 $byStudent = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
@@ -82,7 +85,7 @@ $stmt->close();
 $stmt = $conn->prepare(
     "SELECT e.category, SUM(e.amount) AS spent, COUNT(*) AS n
      FROM expenses e JOIN wallets w ON w.id = e.wallet_id
-     WHERE w.sponsor_id = ? $walletSql AND e.expense_date BETWEEN ? AND ?
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') $walletSql AND e.expense_date BETWEEN ? AND ?
      GROUP BY e.category ORDER BY spent DESC"
 );
 $stmt->bind_param('iss', $sponsorId, $from, $to);
@@ -93,7 +96,7 @@ $stmt->close();
 $stmt = $conn->prepare(
     "SELECT a.category, SUM(a.allocated) AS allocated
      FROM budget_allocations a JOIN wallets w ON w.id = a.wallet_id
-     WHERE w.sponsor_id = ? $walletSql GROUP BY a.category"
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') $walletSql GROUP BY a.category"
 );
 $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
@@ -104,7 +107,7 @@ $stmt->close();
 $stmt = $conn->prepare(
     "SELECT e.id, e.expense_date, e.category, e.description, e.amount, e.receipt_file, u.full_name
      FROM expenses e JOIN wallets w ON w.id = e.wallet_id JOIN users u ON u.id = w.student_id
-     WHERE w.sponsor_id = ? $walletSql AND e.expense_date BETWEEN ? AND ?
+     WHERE EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.student_id AND sx.sponsor_id = ? AND sx.status = 'active') $walletSql AND e.expense_date BETWEEN ? AND ?
      ORDER BY e.expense_date, e.id"
 );
 $stmt->bind_param('iss', $sponsorId, $from, $to);
@@ -113,7 +116,8 @@ $expenses = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
 // ---------- Totals ----------
-$totFunded   = array_sum(array_column($byStudent, 'funded'));
+$totFunded   = array_sum(array_column($byStudent, 'funded'));      // from all sponsors
+$totMine     = array_sum(array_column($byStudent, 'my_funded'));   // from this sponsor
 $totSpent    = array_sum(array_column($byStudent, 'spent'));
 $totExpenses = array_sum(array_column($byStudent, 'n_expenses'));
 $totReceipts = array_sum(array_column($byStudent, 'n_receipts'));
@@ -139,7 +143,8 @@ if (($_GET['format'] ?? '') === 'csv') {
     fputcsv($out, []);
 
     fputcsv($out, ['SUMMARY']);
-    fputcsv($out, ['Funds sent (KES)', number_format($totFunded, 2, '.', '')]);
+    fputcsv($out, ['Funds sent by all sponsors (KES)', number_format($totFunded, 2, '.', '')]);
+    fputcsv($out, ['Funds sent by you (KES)', number_format($totMine, 2, '.', '')]);
     fputcsv($out, ['Spent by students (KES)', number_format($totSpent, 2, '.', '')]);
     fputcsv($out, ['Expenses recorded', $totExpenses]);
     fputcsv($out, ['Expenses with a receipt', $totReceipts . ' (' . $receiptPct . '%)']);
@@ -147,9 +152,9 @@ if (($_GET['format'] ?? '') === 'csv') {
     fputcsv($out, []);
 
     fputcsv($out, ['BY STUDENT']);
-    fputcsv($out, ['Student', 'Funded (KES)', 'Spent (KES)', 'Expenses', 'With receipt', 'Current balance (KES)', 'Wallet']);
+    fputcsv($out, ['Student', 'Funded by all sponsors (KES)', 'Funded by you (KES)', 'Spent (KES)', 'Expenses', 'With receipt', 'Current balance (KES)', 'Wallet']);
     foreach ($byStudent as $s) {
-        fputcsv($out, [$s['full_name'], number_format((float) $s['funded'], 2, '.', ''), number_format((float) $s['spent'], 2, '.', ''),
+        fputcsv($out, [$s['full_name'], number_format((float) $s['funded'], 2, '.', ''), number_format((float) $s['my_funded'], 2, '.', ''), number_format((float) $s['spent'], 2, '.', ''),
                        $s['n_expenses'], $s['n_receipts'], number_format((float) $s['balance'], 2, '.', ''), $s['status']]);
     }
     fputcsv($out, []);
@@ -272,8 +277,9 @@ $active = 'reports';
       <section class="stats" aria-label="Summary">
         <div class="card stat">
           <div class="stat-icon"><?= sw_icon('send') ?></div>
-          <div class="stat-label">Funds sent</div>
+          <div class="stat-label">Funds sent (all sponsors)</div>
           <div class="stat-value"><?= kes($totFunded) ?></div>
+          <div class="stat-note">You sent <?= kes($totMine) ?></div>
         </div>
         <div class="card stat">
           <div class="stat-icon"><?= sw_icon('activity') ?></div>
@@ -350,12 +356,13 @@ $active = 'reports';
         <?php else: ?>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Student</th><th class="num">Funded</th><th class="num">Spent</th><th class="num">Expenses</th><th class="num">With receipt</th><th class="num">Balance now</th></tr></thead>
+              <thead><tr><th>Student</th><th class="num">Funded</th><th class="num">You sent</th><th class="num">Spent</th><th class="num">Expenses</th><th class="num">With receipt</th><th class="num">Balance now</th></tr></thead>
               <tbody>
                 <?php foreach ($byStudent as $s): $pct = $s['n_expenses'] ? round($s['n_receipts'] / $s['n_expenses'] * 100) : 0; ?>
                   <tr>
                     <td><strong><?= htmlspecialchars($s['full_name']) ?></strong><?= $s['status'] !== 'active' ? ' <span class="pill red">Frozen</span>' : '' ?></td>
                     <td class="num"><?= kes2($s['funded']) ?></td>
+                    <td class="num"><?= kes2($s['my_funded']) ?></td>
                     <td class="num"><?= kes2($s['spent']) ?></td>
                     <td class="num"><?= (int) $s['n_expenses'] ?></td>
                     <td class="num"><?= (int) $s['n_expenses'] ? $pct . '%' : '—' ?></td>
@@ -365,6 +372,7 @@ $active = 'reports';
                 <tr class="total-row">
                   <td>Total</td>
                   <td class="num"><?= kes2($totFunded) ?></td>
+                  <td class="num"><?= kes2($totMine) ?></td>
                   <td class="num"><?= kes2($totSpent) ?></td>
                   <td class="num"><?= $totExpenses ?></td>
                   <td class="num"><?= $totExpenses ? $receiptPct . '%' : '—' ?></td>
@@ -376,7 +384,7 @@ $active = 'reports';
         <?php endif; ?>
       </section>
 
-      <p class="muted small">Funds sent = M-Pesa payments confirmed in this period. Spent = expenses recorded by students with a date in this period. Balance is the current wallet balance.
+      <p class="muted small">Funds sent = M-Pesa payments confirmed in this period, from all of the student's sponsors ("You sent" = your share). Spent = expenses recorded by students with a date in this period. Balance is the current wallet balance.
         Generated <?= htmlspecialchars(date('j M Y, H:i')) ?>.</p>
     </main>
   </div>
