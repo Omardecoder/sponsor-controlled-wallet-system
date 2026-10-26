@@ -179,7 +179,7 @@ $active = 'proposals';
 
               <div class="row">
                 <button type="submit" name="decision" value="approve" class="btn"
-                        onclick="return confirm('Approve this budget and add the amount shown to the wallet?');">Approve</button>
+                        onclick="return confirm('Approve this budget? If a top-up amount is entered, an M-Pesa prompt will be sent to your phone.');">Approve</button>
                 <button type="submit" name="decision" value="changes" class="btn btn-outline">Request changes</button>
               </div>
             </form>

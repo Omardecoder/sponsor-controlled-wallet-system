@@ -108,7 +108,7 @@ $active = 'dashboard';
     <header class="topbar">
       <h1>Sponsor Dashboard</h1>
       <div class="topbar-right">
-                <a class="bell" href="alerts.php" title="Alerts" aria-label="Alerts: <?= $alertCount ?> new">
+        <a class="bell" href="alerts.php" title="Alerts" aria-label="Alerts: <?= $alertCount ?> new">
           <?= sw_icon('bell') ?>
           <?php if ($alertCount > 0): ?><span class="dot"><?= $alertCount ?></span><?php endif; ?>
         </a>

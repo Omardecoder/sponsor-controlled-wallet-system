@@ -59,7 +59,7 @@ $sidebarLinks = [
     ['proposals', 'Budget Proposals', 'sponsor-proposals.php',              'proposals'],
     ['funding',   'Funding History',  'sponsor-dashboard.php#transactions', 'history'],
     ['spending',  'Spending History', 'sponsor-spending.php',               'receipt'],
-        ['reports',   'Reports',          'sponsor-reports.php',                'reports'],
+    ['reports',   'Reports',          'sponsor-reports.php',                'reports'],
 ];
 ?>
 <aside class="sidebar">
