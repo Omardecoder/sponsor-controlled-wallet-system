@@ -2,11 +2,12 @@
 // backend/register_process.php
 // Receives the registration form, validates it, and saves a new user.
 // Public registration can only create "student" or "sponsor" accounts.
+// An "organization" is saved as a sponsor with sponsor_type = 'organization' (verified later by the admin).
 
 session_start();
 require_once __DIR__ . '/db.php';
 
-const ALLOWED_ROLES = ['student', 'sponsor'];   // admin is never allowed here
+const ALLOWED_ROLES = ['student', 'sponsor', 'organization'];   // admin is never allowed here
 
 function back_with_errors(array $errors, array $old): void
 {
@@ -51,7 +52,7 @@ if ($password !== $confirm) {
     $errors[] = 'The two passwords do not match.';
 }
 if (!in_array($role, ALLOWED_ROLES, true)) {
-    $errors[] = 'Choose Student or Sponsor.';
+    $errors[] = 'Choose Student, Sponsor or Organization.';
 }
 
 // ---- Duplicate check (only if the basics are fine) ----
@@ -75,9 +76,13 @@ if ($errors) {
 // ---- Save the user with a hashed password ----
 $hash = password_hash($password, PASSWORD_DEFAULT);
 
+// Sponsors and organizations both use the sponsor role; sponsor_type tells them apart
+$dbRole      = $role === 'student' ? 'student' : 'sponsor';
+$sponsorType = $role === 'student' ? null : ($role === 'organization' ? 'organization' : 'individual');
+
 try {
-    $stmt = $conn->prepare('INSERT INTO users (full_name, email, phone, password, role) VALUES (?, ?, ?, ?, ?)');
-    $stmt->bind_param('sssss', $full_name, $email, $phone, $hash, $role);
+    $stmt = $conn->prepare('INSERT INTO users (full_name, email, phone, password, role, sponsor_type) VALUES (?, ?, ?, ?, ?, ?)');
+    $stmt->bind_param('ssssss', $full_name, $email, $phone, $hash, $dbRole, $sponsorType);
     $stmt->execute();
     $stmt->close();
 } catch (mysqli_sql_exception $e) {
@@ -89,6 +94,8 @@ try {
     back_with_errors(['Something went wrong. Please try again.'], $old);
 }
 
-$_SESSION['flash_success'] = 'Account created. You can log in now.';
+$_SESSION['flash_success'] = $role === 'organization'
+    ? 'Organization account created. You can log in and set up programs now; students will see them once the administrator verifies your organization.'
+    : 'Account created. You can log in now.';
 header('Location: ../Frontend/login.php');
 exit;

@@ -95,6 +95,21 @@ $payments = $conn->query(
      LIMIT 30'
 )->fetch_all(MYSQLI_ASSOC);
 
+// ---------- Organizations (must be verified before students see their programs) ----------
+$orgs = [];
+try {
+    $orgs = $conn->query(
+        "SELECT u.id, u.full_name, u.email, u.phone, u.about, u.org_verified, u.created_at,
+                (SELECT COUNT(*) FROM programs pr WHERE pr.org_id = u.id) AS n_programs,
+                (SELECT COUNT(*) FROM sponsorships x WHERE x.sponsor_id = u.id AND x.status = 'active') AS n_students
+         FROM users u
+         WHERE u.role = 'sponsor' AND u.sponsor_type = 'organization'
+         ORDER BY u.org_verified, u.created_at DESC"
+    )->fetch_all(MYSQLI_ASSOC);
+} catch (Throwable $e) {
+    // Step 22a not run yet
+}
+
 function kes($v): string { return 'KES ' . number_format((float) $v, 0); }
 function masked_phone(string $p254): string
 {
@@ -227,6 +242,43 @@ $active = 'overview';
                       <?php endif; ?>
                     </td>
                     <td><?= htmlspecialchars(date('j M Y', strtotime($u['created_at']))) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </section>
+
+      <!-- Organizations -->
+      <section class="card" id="organizations">
+        <div class="card-head">
+          <h3>Organizations</h3>
+          <span class="muted small">Students only see programs from verified organizations</span>
+        </div>
+        <?php if (!$orgs): ?>
+          <p class="empty">No organization accounts yet.</p>
+        <?php else: ?>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Organization</th><th>Contact</th><th>Programs</th><th>Students</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody>
+                <?php foreach ($orgs as $o): $ok = (int) $o['org_verified'] === 1; ?>
+                  <tr>
+                    <td><strong><?= htmlspecialchars($o['full_name']) ?></strong>
+                      <?php if ($o['about']): ?><div class="muted small wrap"><?= htmlspecialchars($o['about']) ?></div><?php endif; ?></td>
+                    <td class="muted"><?= htmlspecialchars($o['email']) ?><br><?= htmlspecialchars($o['phone']) ?></td>
+                    <td><?= (int) $o['n_programs'] ?></td>
+                    <td><?= (int) $o['n_students'] ?></td>
+                    <td><span class="pill <?= $ok ? 'green' : 'amber' ?>"><?= $ok ? 'Verified' : 'Waiting' ?></span></td>
+                    <td>
+                      <form action="../Backend/admin_org_status.php" method="post" class="inline-action">
+                        <input type="hidden" name="org_id" value="<?= (int) $o['id'] ?>">
+                        <input type="hidden" name="action" value="<?= $ok ? 'unverify' : 'verify' ?>">
+                        <button type="submit" class="btn btn-sm <?= $ok ? 'btn-outline' : '' ?>"
+                                onclick="return confirm('<?= $ok ? 'Remove verification? Its programs will be hidden from students.' : 'Verify this organization? Students will be able to see and apply to its programs.' ?>');"><?= $ok ? 'Unverify' : 'Verify' ?></button>
+                      </form>
+                    </td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>

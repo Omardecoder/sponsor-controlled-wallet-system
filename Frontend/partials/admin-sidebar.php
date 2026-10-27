@@ -8,6 +8,7 @@ $active = $active ?? 'overview';
 $sidebarLinks = [
     ['overview', 'Overview',         'admin-dashboard.php',           'dashboard'],
     ['users',    'Users',            'admin-dashboard.php#users',     'students'],
+    ['orgs',     'Organizations',    'admin-dashboard.php#organizations', 'shield'],
     ['wallets',  'Wallets',          'admin-dashboard.php#wallets',   'wallet'],
     ['payments', 'M-Pesa Payments',  'admin-dashboard.php#payments',  'send'],
 ];

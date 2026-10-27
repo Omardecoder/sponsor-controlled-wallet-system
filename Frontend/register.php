@@ -18,7 +18,8 @@ $tagline = 'Sponsor-controlled wallets';
 // Roles offered on public registration (value => [label, description])
 $roles = [
     'student' => ['Student', 'Receive funds and spend within your sponsor\'s rules.'],
-    'sponsor' => ['Sponsor', 'Fund wallets and control how the money is spent.'],
+    'sponsor'      => ['Sponsor', 'A parent or guardian who funds a student and approves their budget.'],
+    'organization' => ['Organization', 'A foundation or company that posts sponsorship programs students can apply to.'],
 ];
 ?>
 <!DOCTYPE html>
@@ -142,7 +143,7 @@ $roles = [
 
     /* role choice */
     fieldset { border: 0; }
-    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .role-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .role { position: relative; }
     .role input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
     .role-card {
@@ -245,7 +246,7 @@ $roles = [
         <form action="../Backend/register_process.php" method="post" novalidate>
 
           <div class="field">
-            <label for="full_name">Full name</label>
+            <label for="full_name">Full name <span style="font-weight:400;color:var(--muted);">(or organization name)</span></label>
             <input type="text" id="full_name" name="full_name" placeholder="e.g. Amina Wanjiru" autocomplete="name" value="<?= htmlspecialchars($old['full_name']) ?>" required>
           </div>
 
