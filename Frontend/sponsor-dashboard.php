@@ -70,7 +70,18 @@ $stmt->bind_param('i', $sponsorId);
 $stmt->execute();
 $budgetRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
-$categoryLabels = budget_categories();   // slug => label
+$categoryLabels = budget_categories();   // code => name
+
+// Students name their own categories, so combine lines with the same name (e.g. everyone's "Rent")
+$merged = [];
+foreach ($budgetRows as $b) {
+    $name = $categoryLabels[$b['category']] ?? $b['category'];
+    $merged[$name] ??= ['category' => $name, 'allocated' => 0, 'spent' => 0];
+    $merged[$name]['allocated'] += (float) $b['allocated'];
+    $merged[$name]['spent']     += (float) $b['spent'];
+}
+usort($merged, fn($a, $b) => $b['allocated'] <=> $a['allocated']);
+$budgetRows = array_values(array_filter($merged, fn($b) => $b['allocated'] > 0 || $b['spent'] > 0));
 
 // ---- Recent transactions on my students' wallets (from any of their sponsors) ----
 $stmt = $conn->prepare(
@@ -111,7 +122,7 @@ $active = 'dashboard';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sponsor Dashboard | SponsorWallet</title>
+  <title>Sponsor Dashboard | SS-Wallet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">

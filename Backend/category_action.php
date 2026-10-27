@@ -1,6 +1,7 @@
 <?php
 // Backend/category_action.php
-// A student adds or removes their own budget categories (e.g. "Entertainment").
+// A student creates and removes their budget categories. Every category is the student's own
+// (typed in, or picked from the suggestions on the budget page).
 //   action = add     name = "Entertainment"
 //   action = remove  id   = 7      (only if never used in a budget or an expense)
 
@@ -48,16 +49,15 @@ if ($action === 'add') {
         back('error', 'Use only letters, numbers, spaces, & \' and - in a category name.');
     }
 
-    // No duplicates (ignoring capital letters), including the standard ones
+    // No duplicates (ignoring capital letters)
     $existing = budget_categories($walletId);
     foreach ($existing as $label) {
         if (mb_strtolower($label) === mb_strtolower($name)) {
             back('error', '"' . $name . '" is already one of your categories.');
         }
     }
-    $customCount = count($existing) - count(STANDARD_CATEGORIES);
-    if ($customCount >= MAX_CUSTOM_CATEGORIES) {
-        back('error', 'You can have at most ' . MAX_CUSTOM_CATEGORIES . ' categories of your own. Remove one you no longer use first.');
+    if (count($existing) >= MAX_CUSTOM_CATEGORIES) {
+        back('error', 'You can have at most ' . MAX_CUSTOM_CATEGORIES . ' categories. Remove one you no longer use first.');
     }
 
     try {

@@ -1,15 +1,17 @@
 <?php
 // Backend/categories.php
-// Budget categories = 5 standard ones + custom ones that students add themselves.
+// Budget categories belong to each student: the student creates every category they need
+// (helped by a list of suggestions). Nothing is fixed.
 //
-// budget_categories()            -> standard + ALL custom categories (use this for showing names)
-// budget_categories($walletId)   -> standard + only that student's custom categories (use this for forms)
-// sponsor_categories($sponsorId) -> standard + custom categories of the students that sponsor actively sponsors
+// budget_categories()            -> every category name in the system (use this for SHOWING names)
+// budget_categories($walletId)   -> only that student's categories (use this for FORMS)
+// sponsor_categories($sponsorId) -> the categories of the students that sponsor actively sponsors (filters)
 //
-// Custom categories are stored in the custom_categories table and use the code "c" + id (e.g. "c7"),
-// so they never clash with the standard codes below.
+// Categories are stored in the custom_categories table and use the code "c" + id (e.g. "c7").
+// Step 23 converted the five old built-in categories into each student's own categories;
+// their old codes are kept below only so very old records still show a name.
 
-const STANDARD_CATEGORIES = [
+const LEGACY_CATEGORIES = [
     'tuition'   => 'Tuition',
     'rent'      => 'Rent',
     'food'      => 'Food',
@@ -17,7 +19,13 @@ const STANDARD_CATEGORIES = [
     'academic'  => 'Academic Materials',
 ];
 
-const MAX_CUSTOM_CATEGORIES = 10;
+// Quick picks offered on the budget page. The student can also type any name.
+const SUGGESTED_CATEGORIES = [
+    'Tuition', 'Rent', 'Food', 'Transport', 'Academic Materials', 'Internet & Airtime',
+    'Medical', 'Personal Care', 'Clothing', 'Entertainment', 'Savings',
+];
+
+const MAX_CUSTOM_CATEGORIES = 15;   // per student
 
 function budget_categories(?int $walletId = null): array
 {
@@ -29,12 +37,11 @@ function budget_categories(?int $walletId = null): array
         return $cache[$key];
     }
 
-    $list = STANDARD_CATEGORIES;
+    $list = $walletId === null ? LEGACY_CATEGORIES : [];
     if ($conn instanceof mysqli) {
         try {
             if ($walletId === null) {
-                $result = $conn->query('SELECT id, name FROM custom_categories ORDER BY name');
-                $rows = $result->fetch_all(MYSQLI_ASSOC);
+                $rows = $conn->query('SELECT id, name FROM custom_categories ORDER BY name')->fetch_all(MYSQLI_ASSOC);
             } else {
                 $stmt = $conn->prepare('SELECT id, name FROM custom_categories WHERE wallet_id = ? ORDER BY name');
                 $stmt->bind_param('i', $walletId);
@@ -46,7 +53,7 @@ function budget_categories(?int $walletId = null): array
                 $list['c' . $r['id']] = $r['name'];
             }
         } catch (Throwable $e) {
-            // Table not created yet: just use the standard categories
+            // Table not created yet
         }
     }
     return $cache[$key] = $list;
@@ -55,13 +62,13 @@ function budget_categories(?int $walletId = null): array
 function sponsor_categories(int $sponsorId): array
 {
     global $conn;
-    $list = STANDARD_CATEGORIES;
+    $list = LEGACY_CATEGORIES;
     try {
         $stmt = $conn->prepare(
-            'SELECT c.id, c.name FROM custom_categories c
+            "SELECT c.id, c.name FROM custom_categories c
              JOIN wallets w ON w.id = c.wallet_id
-             JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = \'active\'
-             WHERE sp.sponsor_id = ? ORDER BY c.name'
+             JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = 'active'
+             WHERE sp.sponsor_id = ? ORDER BY c.name"
         );
         $stmt->bind_param('i', $sponsorId);
         $stmt->execute();
@@ -74,7 +81,7 @@ function sponsor_categories(int $sponsorId): array
     return $list;
 }
 
-/** Is this one of the student's own custom categories (not a standard one)? */
+/** Is this a student-created category code ("c" + id)? */
 function is_custom_category(string $slug): bool
 {
     return (bool) preg_match('/^c\d+$/', $slug);

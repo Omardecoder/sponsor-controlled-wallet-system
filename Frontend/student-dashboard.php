@@ -117,7 +117,7 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Student Dashboard | SponsorWallet</title>
+  <title>Student Dashboard | SS-Wallet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -195,7 +195,7 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
       <?php if (!$wallet || !$sponsors): ?>
         <section class="card">
           <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
-          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with. Once you accept their request, your wallet and budget tools appear here.</p>
+          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, or <a href="student-programs.php">apply to a sponsorship program</a> from an organization. Once you have a sponsor, your wallet and budget tools appear here.</p>
         </section>
 
       <?php else: ?>

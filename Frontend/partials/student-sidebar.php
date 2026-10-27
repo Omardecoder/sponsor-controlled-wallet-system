@@ -3,7 +3,7 @@
 // The student sidebar, shared by every student page.
 //
 // Before including it, a page sets which link is highlighted:
-//     $active = 'dashboard';   // or 'alerts', 'budget', 'record', 'spending', 'funding'
+//     $active = 'dashboard';   // or 'alerts', 'budget', 'record', 'spending', 'funding', 'programs'
 // It also sets $alertCount (unread alerts) for the page to use.
 
 require_once __DIR__ . '/icons.php';
@@ -20,13 +20,14 @@ $sidebarLinks = [
     ['record',    'Record Spending',  'record-spending.php',                          'pen'],
     ['spending',  'Spending History', 'record-spending.php?view=history#history',     'receipt'],
     ['funding',   'Funding History',  'student-dashboard.php?tx=funding#transactions',  'history'],
+    ['programs',  'Find Sponsorship', 'student-programs.php',                         'award'],
 ];
 ?>
 <aside class="sidebar">
   <div class="brand">
     <div class="brand-mark"><?= sw_icon('wallet') ?></div>
     <div>
-      <div class="brand-name">SponsorWallet</div>
+      <div class="brand-name">SS-Wallet</div>
       <div class="brand-role">Student</div>
     </div>
   </div>

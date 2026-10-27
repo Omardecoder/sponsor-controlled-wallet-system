@@ -8,7 +8,7 @@ $oldIdentifier = $_SESSION['login_old_identifier'] ?? '';
 $success = $_SESSION['flash_success'] ?? '';
 unset($_SESSION['login_error'], $_SESSION['login_old_identifier'], $_SESSION['flash_success']);
 
-$appName = 'SponsorWallet';          // change to your system name
+$appName = 'SS-Wallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
 ?>
 <!DOCTYPE html>

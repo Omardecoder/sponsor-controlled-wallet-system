@@ -22,9 +22,13 @@ $students = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 $studentIds = array_map('intval', array_column($students, 'id'));
 
-// Filters: ?wallet=ID&cat=slug&receipt=with|without
+// Filters: ?wallet=ID&cat=NAME&receipt=with|without
+// Students create their own categories, so the filter works by NAME (e.g. every student's "Rent")
+$myCategories  = sponsor_categories($sponsorId);            // code => name
+$categoryNames = array_values(array_unique($myCategories));
+sort($categoryNames);
 $walletFilter  = in_array((int) ($_GET['wallet'] ?? 0), $studentIds, true) ? (int) $_GET['wallet'] : 0;
-$catFilter     = array_key_exists($_GET['cat'] ?? '', $labels) ? $_GET['cat'] : '';
+$catFilter     = in_array($_GET['cat'] ?? '', $categoryNames, true) ? $_GET['cat'] : '';
 $receiptFilter = in_array($_GET['receipt'] ?? '', ['with', 'without'], true) ? $_GET['receipt'] : '';
 
 // Build the query with only the filters that are set
@@ -32,7 +36,12 @@ $where  = ["EXISTS (SELECT 1 FROM sponsorships sx WHERE sx.student_id = w.studen
 $types  = 'i';
 $params = [$sponsorId];
 if ($walletFilter) { $where[] = 'e.wallet_id = ?'; $types .= 'i'; $params[] = $walletFilter; }
-if ($catFilter)    { $where[] = 'e.category = ?';  $types .= 's'; $params[] = $catFilter; }
+if ($catFilter) {
+    $codes   = array_keys($myCategories, $catFilter, true);   // all codes with that name
+    $where[] = 'e.category IN (' . implode(',', array_fill(0, count($codes), '?')) . ')';
+    $types  .= str_repeat('s', count($codes));
+    array_push($params, ...$codes);
+}
 if ($receiptFilter === 'with')    { $where[] = 'e.receipt_file IS NOT NULL'; }
 if ($receiptFilter === 'without') { $where[] = 'e.receipt_file IS NULL'; }
 $whereSql = implode(' AND ', $where);
@@ -78,7 +87,7 @@ $active = 'spending';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spending History | SponsorWallet</title>
+  <title>Spending History | SS-Wallet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -126,8 +135,8 @@ $active = 'spending';
           <label for="cat">Budget line</label>
           <select id="cat" name="cat">
             <option value="">All budget lines</option>
-            <?php foreach (sponsor_categories($sponsorId) as $slug => $label): ?>
-              <option value="<?= htmlspecialchars($slug) ?>" <?= $catFilter === $slug ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+            <?php foreach ($categoryNames as $name): ?>
+              <option value="<?= htmlspecialchars($name) ?>" <?= $catFilter === $name ? 'selected' : '' ?>><?= htmlspecialchars($name) ?></option>
             <?php endforeach; ?>
           </select>
         </div>

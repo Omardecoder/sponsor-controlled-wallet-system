@@ -12,7 +12,7 @@ $old    = $_SESSION['register_old'] ?? [];
 unset($_SESSION['register_errors'], $_SESSION['register_old']);
 $old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => ''];
 
-$appName = 'SponsorWallet';          // change to your system name
+$appName = 'SS-Wallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
 
 // Roles offered on public registration (value => [label, description])

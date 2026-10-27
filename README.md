@@ -1,4 +1,4 @@
-# SponsorWallet
+# SS-Wallet
 
 Sponsor-controlled wallet system (PHP + MySQL).
 

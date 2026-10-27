@@ -125,17 +125,33 @@ $receiptPct  = $totExpenses ? round($totReceipts / $totExpenses * 100) : 0;
 $totBalance  = array_sum(array_column($byStudent, 'balance'));
 
 $catName = fn(string $slug) => $labels[$slug] ?? $slug;
+
+// Students name their own categories, so combine categories with the same name across students
+$mergedCat = [];
+foreach ($byCategory as $c) {
+    $name = $catName($c['category']);
+    $mergedCat[$name] ??= ['category' => $name, 'spent' => 0, 'n' => 0];
+    $mergedCat[$name]['spent'] += (float) $c['spent'];
+    $mergedCat[$name]['n']     += (int) $c['n'];
+}
+usort($mergedCat, fn($a, $b) => $b['spent'] <=> $a['spent']);
+$byCategory = array_values($mergedCat);
+$allocByName = [];
+foreach ($allocated as $code => $amount) {
+    $allocByName[$catName((string) $code)] = ($allocByName[$catName((string) $code)] ?? 0) + (float) $amount;
+}
+$allocated = $allocByName;
 $studentName = $walletFilter ? (array_column($students, 'full_name', 'id')[$walletFilter] ?? '') : 'All students';
 
 // =================== CSV download ===================
 if (($_GET['format'] ?? '') === 'csv') {
-    $file = 'sponsorwallet-report-' . $from . '-to-' . $to . '.csv';
+    $file = 'SS-Wallet-report-' . $from . '-to-' . $to . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $file . '"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");   // so Excel shows the text correctly
 
-    fputcsv($out, ['SponsorWallet financial report']);
+    fputcsv($out, ['SS-Wallet financial report']);
     fputcsv($out, ['Sponsor', $_SESSION['full_name']]);
     fputcsv($out, ['Students', $studentName]);
     fputcsv($out, ['Period', $from . ' to ' . $to]);
@@ -200,7 +216,7 @@ $active = 'reports';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reports | SponsorWallet</title>
+  <title>Reports | SS-Wallet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">

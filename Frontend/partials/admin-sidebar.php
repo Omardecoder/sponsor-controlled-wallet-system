@@ -17,7 +17,7 @@ $sidebarLinks = [
   <div class="brand">
     <div class="brand-mark"><?= sw_icon('wallet') ?></div>
     <div>
-      <div class="brand-name">SponsorWallet</div>
+      <div class="brand-name">SS-Wallet</div>
       <div class="brand-role">Administrator</div>
     </div>
   </div>

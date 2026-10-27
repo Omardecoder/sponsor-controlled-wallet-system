@@ -379,3 +379,30 @@ input[type=tel]:disabled, input[type=number]:disabled { background: var(--paper)
 /* ---------- Approval by every sponsor ---------- */
 .approval-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 14px; }
 .money-box { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+
+
+/* ---------- Organizations, programs and applications ---------- */
+label.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 500; margin: 0; }
+label.check input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--forest); }
+.doc-choices { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; }
+.doc-choices legend { font-weight: 600; font-size: .88rem; padding: 0 6px; }
+.program-amount { text-align: right; }
+.program-desc { margin: 0 0 10px; }
+.program-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 12px 0 16px; padding: 10px 14px; background: var(--paper); border-radius: 10px; font-size: .9rem; }
+.apply-box > summary { list-style: none; display: inline-flex; width: auto; }
+.apply-box > summary::-webkit-details-marker { display: none; }
+.apply-box[open] > summary { margin-bottom: 14px; }
+.mini-head { font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+.motivation { margin: 0 0 16px; white-space: normal; }
+.doc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.doc-list a { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+@media (max-width: 480px) { .program-amount { text-align: left; } }
+
+
+
+/* ---------- Student-chosen categories ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--paper); color: var(--forest); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; }
+.chip:hover { border-color: var(--forest); background: #e4efe9; }
+.chip:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
+.chip .icon { width: 15px; height: 15px; }
