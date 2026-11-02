@@ -90,15 +90,14 @@ if ($decision === 'decline') {
 notify(
     $conn, $sponsorId, 'sponsorship_accepted',
     $studentName . ' accepted your sponsorship',
-    'Your pledge: KSh ' . number_format((float) $request['pledge']) . '. You can now see their wallet, approve budgets and send funds.',
+    'You can now see their wallet, fund their budgets and send money.',
     'sponsor-dashboard.php#students'
 );
 notify_sponsors(
     $conn, $studentId, 'co_sponsor_joined',
     $request['sponsor_name'] . ' is now also sponsoring ' . $studentName,
-    'Pledge: KSh ' . number_format((float) $request['pledge']) . '. Budgets now need approval from every sponsor.',
+    'They can now fund a share of ' . $studentName . '\'s budgets alongside you.',
     'sponsor-dashboard.php#students', null, $sponsorId
 );
 
-back('success', $request['sponsor_name'] . ' is now one of your sponsors. Your budget can total up to KSh '
-    . number_format(pledge_total($conn, $studentId)) . '.');
+back('success', $request['sponsor_name'] . ' is now one of your sponsors. They can fund a share of each budget you send.');

@@ -76,7 +76,7 @@ $active = 'programs';
       <div class="page-head">
         <div>
           <h2>Sponsorship programs</h2>
-          <p class="muted">Post a program, students apply with their documents, and each student you accept is linked to you automatically with the program amount as your pledge.</p>
+          <p class="muted">Post a program, students apply with their documents, and each student you accept is linked to you automatically. You can then fund up to the program amount of each budget they send.</p>
         </div>
       </div>
 

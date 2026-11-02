@@ -1,10 +1,9 @@
 <?php
 // Backend/submit_budget_proposal.php
-// Saves a student's budget proposal for review by ALL of the student's active sponsors.
-//
-// The total can't be more than the sponsors' pledges added together.
-// It MAY be more than the wallet balance: the sponsors add the money when approving.
-// Only one proposal can wait for review at a time.
+// Saves a student's budget proposal and sends it to all of the student's funders (active sponsors).
+// Each funder then commits a share of it (a % or an amount); when the commitments reach 100% the
+// budget becomes active. If it stays below 100%, the student decides what to do (budget_action.php).
+// Only one proposal can wait for funding at a time.
 
 session_start();
 
@@ -63,14 +62,25 @@ if ($totalCents <= 0) {
     back('error', 'Enter an amount for at least one category.');
 }
 
-// The budget can't be more than what the sponsors pledged together
-$pledgedCents = (int) round(pledge_total($conn, $studentId) * 100);
-if ($pledgedCents <= 0) {
-    back('error', 'You have no active sponsor yet. Accept a sponsor\'s request on your dashboard first.');
+// A line that is in the approved budget can't be set below what has already been spent in it
+if ($myWallet) {
+    $wid  = (int) $myWallet['id'];
+    $stmt = $conn->prepare('SELECT category, allocated, spent FROM budget_allocations WHERE wallet_id = ? AND allocated > 0');
+    $stmt->bind_param('i', $wid);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $line) {
+        $spentCents = (int) round((float) $line['spent'] * 100);
+        if ($spentCents > 0 && ($items[$line['category']] ?? 0) < $spentCents) {
+            back('error', ($categories[$line['category']] ?? 'A category') . ' can\'t be less than the KSh '
+                . number_format($spentCents / 100, 2) . ' you have already spent in it.');
+        }
+    }
+    $stmt->close();
 }
-if ($totalCents > $pledgedCents) {
-    back('error', 'Your budget (KSh ' . number_format($totalCents / 100) . ') is more than your sponsors pledged (KSh '
-        . number_format($pledgedCents / 100) . '). Lower some amounts and submit again.');
+
+// Someone has to be able to fund it
+if (!student_sponsors($conn, $studentId)) {
+    back('error', 'You have no active sponsor yet. Accept a sponsor\'s request, or apply to a program, first.');
 }
 
 try {
@@ -103,7 +113,7 @@ try {
 
     if ($alreadyPending) {
         $conn->rollback();
-        back('error', 'You already have a proposal waiting for your sponsors. Wait for their decision before sending another.');
+        back('error', 'You already have a budget waiting for funding. Wait for it, accept the funding you have, or withdraw it first.');
     }
 
     // Create the proposal as pending sponsor review.
@@ -135,8 +145,8 @@ $sponsorCount = count(student_sponsors($conn, $studentId));
 notify_sponsors(
     $conn, $studentId, 'proposal_submitted',
     $_SESSION['full_name'] . ' submitted a budget',
-    'KSh ' . number_format($totalCents / 100) . ' across ' . count($items) . ' categories, waiting for your approval'
-        . ($sponsorCount > 1 ? ' (every sponsor must approve).' : '.'),
+    'KSh ' . number_format($totalCents / 100) . ' across ' . count($items) . ' categories. Choose how much of it you will fund'
+        . ($sponsorCount > 1 ? ' (your ' . $sponsorCount . ' funders share it).' : '.'),
     'sponsor-proposals.php'
 );
-back('success', 'Your budget proposal has been sent to your sponsor' . ($sponsorCount > 1 ? 's' : '') . ' for review.');
+back('success', 'Your budget was sent to your sponsor' . ($sponsorCount > 1 ? 's' : '') . '. It becomes active when it is 100% funded.');

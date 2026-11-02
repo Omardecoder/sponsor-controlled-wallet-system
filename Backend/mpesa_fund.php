@@ -52,12 +52,8 @@ if ($wallet['status'] !== 'active') {
     back('error', 'This wallet is frozen and cannot be funded.');
 }
 
-// A sponsor can send up to their pledge for this student
-$left = (float) $wallet['pledge'] - sponsor_pledge_used($conn, $sponsorId, $walletId);
-if ($amount > $left) {
-    back('error', 'That is more than what is left of your pledge for ' . $wallet['student_name'] . ' (KSh ' . number_format(max(0, $left))
-        . '). Raise your pledge under My Students first, or send a smaller amount.');
-}
+// Sponsors normally send what is still owed of their share of the current budget (shown on the
+// dashboard). Sending more is allowed: the money stays in the wallet and is still controlled by the budget.
 
 try {
     $paymentId = mpesa_start_funding($conn, $sponsorId, $walletId, $amount, $phone, $note !== '' ? $note : null);

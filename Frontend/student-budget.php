@@ -1,7 +1,9 @@
 <?php
 // Frontend/student-budget.php
-// Student: plan a budget across categories and send it to their sponsors for approval.
-// The budget total can't be more than the sponsors' pledges added together.
+// Student: plan a budget across categories and send it to their funders (sponsors).
+// Each funder commits a share (a % or an amount); at 100% the budget is active.
+// While it waits, the student can accept the funding committed so far (choosing which lines to cut)
+// or withdraw it. Posts to submit_budget_proposal.php and budget_action.php.
 // Posts to ../Backend/submit_budget_proposal.php (fields: alloc[slug]).
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
@@ -14,7 +16,7 @@ $studentId = (int) $_SESSION['user_id'];
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
-// The student's wallet, sponsors and the total they pledged
+// The student's wallet and sponsors
 $stmt = $conn->prepare('SELECT id, balance, status FROM wallets WHERE student_id = ? LIMIT 1');
 $stmt->bind_param('i', $studentId);
 $stmt->execute();
@@ -22,11 +24,10 @@ $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 $sponsors = student_sponsors($conn, $studentId);
-$pledged  = array_sum(array_column($sponsors, 'pledge'));
 if (!$sponsors) {
     $wallet = null;   // no accepted sponsor yet: nothing to plan for
 }
-$approvals = null;
+$funding = null;   // funding status of a budget that is waiting
 
 $categories = [];                    // code => name (the student's own categories)
 $approved   = [];                    // slug => ['allocated' => .., 'spent' => ..]
@@ -67,7 +68,7 @@ if ($wallet) {
         }
         $stmt->close();
         if ($proposal['status'] === 'pending') {
-            $approvals = proposal_approvals($conn, $pid, $studentId);
+            $funding = proposal_funding($conn, $pid, $studentId);
         }
     }
 }
@@ -130,7 +131,7 @@ $active = 'budget';
       <div class="page-head">
         <div>
           <h2>Plan my budget</h2>
-          <p class="muted">Decide how much goes to each category, then send it to your sponsors for approval.</p>
+          <p class="muted">Decide how much goes to each category, then send it to your sponsors. Each one chooses how much of it to fund; at 100% your budget is active.</p>
         </div>
       </div>
 
@@ -147,15 +148,81 @@ $active = 'budget';
       <?php else: ?>
 
         <?php if ($isPending): ?>
-          <div class="notice">
-            <span><strong>Waiting for approval<?= $approvals['needed'] > 1 ? ' (' . $approvals['approved'] . ' of ' . $approvals['needed'] . ' sponsors approved)' : '' ?>.</strong>
-              You sent this budget on <?= htmlspecialchars(date('j M Y, H:i', strtotime($proposal['created_at']))) ?>. You can send a new one after your sponsors review it.
-              <br>
-              <?php foreach ($approvals['sponsors'] as $a): ?>
-                <span class="pill <?= $a['decision'] === 'approved' ? 'green' : 'amber' ?>"><?= htmlspecialchars($a['full_name']) ?>: <?= $a['decision'] === 'approved' ? 'approved' : 'waiting' ?></span>
-              <?php endforeach; ?>
-            </span>
-          </div>
+          <!-- Funding progress of the budget that is waiting -->
+          <section class="card funding-card">
+            <div class="card-head">
+              <h3>Your budget is <?= $funding['percent'] ?>% funded</h3>
+              <span class="muted small">Sent <?= htmlspecialchars(date('j M Y, H:i', strtotime($proposal['created_at']))) ?></span>
+            </div>
+            <div class="bar-top"><b>KSh <?= number_format($funding['committed'], 2) ?> of <?= number_format($funding['total'], 2) ?></b><span>KSh <?= number_format($funding['remaining'], 2) ?> still uncovered</span></div>
+            <div class="bar-track" role="img" aria-label="<?= $funding['percent'] ?>% funded"><div class="bar-fill" style="width: <?= $funding['percent'] ?>%"></div></div>
+            <div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead><tr><th>Funder</th><th class="num">Will fund</th><th class="num">Share</th><th>Note</th></tr></thead>
+                <tbody>
+                  <?php foreach ($funding['sponsors'] as $i => $f): ?>
+                    <tr>
+                      <td>Funder <?= $i + 1 ?>: <strong><?= htmlspecialchars($f['full_name']) ?></strong></td>
+                      <td class="num"><?= $f['commit_amount'] > 0 ? ksh($f['commit_amount']) : '<span class="muted">not yet</span>' ?></td>
+                      <td class="num"><?= $f['commit_amount'] > 0 ? $f['share'] . '%' : '—' ?></td>
+                      <td class="wrap muted"><?= htmlspecialchars($f['feedback'] ?? '') ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="row" style="margin-top:14px;">
+              <?php if ($funding['committed'] > 0 && !$frozen): ?>
+                <a class="btn" href="#accept-partial"><?= sw_icon('pen') ?>Start with <?= $funding['percent'] ?>% funding</a>
+              <?php endif; ?>
+              <form action="../Backend/budget_action.php" method="post" class="inline-action"
+                    onsubmit="return confirm('Withdraw this budget? Your sponsors\' commitments to it will be cancelled.');">
+                <input type="hidden" name="action" value="withdraw">
+                <input type="hidden" name="proposal_id" value="<?= (int) $proposal['id'] ?>">
+                <button type="submit" class="btn btn-outline">Withdraw this budget</button>
+              </form>
+            </div>
+            <p class="muted small">You can wait for the rest, start now with what is funded (you choose which lines to reduce), or withdraw it and send a different budget.</p>
+          </section>
+
+          <?php if ($funding['committed'] > 0 && !$frozen):
+              $factor = $funding['total'] > 0 ? $funding['committed'] / $funding['total'] : 0;
+          ?>
+            <!-- Accept partial funding: the student decides which lines to reduce -->
+            <section class="card" id="accept-partial">
+              <div class="card-head">
+                <h3>Start with the funding you have</h3>
+                <span class="muted small">Lines must add up to KSh <?= number_format($funding['committed'], 2) ?> or less</span>
+              </div>
+              <form action="../Backend/budget_action.php" method="post" id="partial-form" data-max="<?= htmlspecialchars((string) $funding['committed']) ?>">
+                <input type="hidden" name="action" value="accept_partial">
+                <input type="hidden" name="proposal_id" value="<?= (int) $proposal['id'] ?>">
+                <div class="cat-list">
+                  <?php foreach ($proposed as $slug => $amt):
+                      $alreadySpent = (float) ($approved[$slug]['spent'] ?? 0);
+                      // every line reduced by the same %, but never below what is already spent
+                      $suggested = min($amt, max($alreadySpent, floor($amt * $factor * 100) / 100));
+                  ?>
+                    <div class="cat-row">
+                      <div>
+                        <label for="p-<?= htmlspecialchars($slug) ?>"><?= htmlspecialchars($categories[$slug] ?? (budget_categories()[$slug] ?? $slug)) ?></label>
+                        <div class="muted small">You asked for <?= ksh($amt) ?><?= $alreadySpent > 0 ? ' · already spent ' . ksh($alreadySpent) . ' (the minimum)' : '' ?></div>
+                      </div>
+                      <div class="money-input">
+                        <span>KSh</span>
+                        <input type="number" class="p-alloc" id="p-<?= htmlspecialchars($slug) ?>" name="alloc[<?= htmlspecialchars($slug) ?>]"
+                               min="<?= htmlspecialchars((string) min($amt, $alreadySpent)) ?>" max="<?= htmlspecialchars((string) $amt) ?>" step="0.01" value="<?= htmlspecialchars(number_format($suggested, 2, '.', '')) ?>">
+                      </div>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+                <p class="muted" id="partial-total"></p>
+                <button type="submit" class="btn" id="partial-save"
+                        onclick="return confirm('Start your budget with these amounts?');">Start my budget with these amounts</button>
+              </form>
+            </section>
+          <?php endif; ?>
         <?php elseif ($needsChange): ?>
           <div class="notice">
             <span><strong><?= htmlspecialchars($proposal['reviewer_name'] ?? 'Your sponsor') ?> asked for changes.</strong>
@@ -169,9 +236,9 @@ $active = 'budget';
         <!-- Live figures -->
         <section class="stats" aria-label="Budget figures">
           <div class="card stat">
-            <div class="stat-label">Sponsors' pledges</div>
-            <div class="stat-value"><?= ksh($pledged) ?></div>
-            <div class="stat-note">Your budget can't be more than this</div>
+            <div class="stat-label">Sponsors</div>
+            <div class="stat-value"><?= count($sponsors) ?></div>
+            <div class="stat-note">Each chooses how much of your budget to fund</div>
           </div>
           <div class="card stat">
             <div class="stat-label">Wallet balance</div>
@@ -231,7 +298,7 @@ $active = 'budget';
             <p class="empty">You have no categories yet. Add the ones you need above, for example Rent, Food and Transport, then enter an amount for each.</p>
           <?php else: ?>
           <form id="budget-form" action="../Backend/submit_budget_proposal.php" method="post"
-                data-balance="<?= htmlspecialchars((string) $balance) ?>" data-pledged="<?= htmlspecialchars((string) $pledged) ?>">
+                data-balance="<?= htmlspecialchars((string) $balance) ?>">
             <div class="cat-list">
               <?php foreach ($categories as $slug => $label):
                   $spent = (float) ($approved[$slug]['spent'] ?? 0);
@@ -293,7 +360,6 @@ $active = 'budget';
   const form = document.getElementById('budget-form');
   if (form) {
     const balance = parseFloat(form.dataset.balance) || 0;
-    const pledged = parseFloat(form.dataset.pledged) || 0;
     const inputs  = form.querySelectorAll('.alloc');
     const totalEl = document.getElementById('total');
     const gapEl   = document.getElementById('gap');
@@ -324,17 +390,36 @@ $active = 'budget';
         gapLbl.textContent = 'Sponsor would add';
         gapEl.textContent = fmt(-gap);
         gapEl.classList.add('warn-text');
-        gapNote.textContent = 'More than your balance. Your sponsors send the rest when approving.';
+        gapNote.textContent = 'More than your balance. Your sponsors send the rest when they fund it.';
       }
 
-      const overPledge = total > pledged + 0.001;
       warn.textContent = !save ? '' : belowSpent ? 'A category cannot be lower than what you have already spent in it.'
-                       : total <= 0 ? 'Enter an amount for at least one category.'
-                       : overPledge ? 'Your budget is ' + fmt(total - pledged) + ' more than your sponsors pledged (' + fmt(pledged) + '). Lower some amounts.' : '';
-      if (save) save.disabled = belowSpent || total <= 0 || overPledge;
+                       : total <= 0 ? 'Enter an amount for at least one category.' : '';
+      if (save) save.disabled = belowSpent || total <= 0;
     }
     inputs.forEach(i => i.addEventListener('input', update));
     update();
+  }
+
+  // "Start with the funding you have": the lines can't add up to more than what is funded
+  const partial = document.getElementById('partial-form');
+  if (partial) {
+    const max   = parseFloat(partial.dataset.max) || 0;
+    const boxes = partial.querySelectorAll('.p-alloc');
+    const out   = document.getElementById('partial-total');
+    const btn   = document.getElementById('partial-save');
+    const fmt2  = n => 'KSh ' + n.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    function check() {
+      let t = 0;
+      boxes.forEach(b => t += parseFloat(b.value) || 0);
+      t = Math.round(t * 100) / 100;
+      const over = t > max + 0.001;
+      out.textContent = 'Total: ' + fmt2(t) + ' of ' + fmt2(max) + ' funded' + (over ? ' (too much, lower some lines)' : '');
+      out.className = over ? 'form-warn' : 'muted';
+      btn.disabled = over || t <= 0;
+    }
+    boxes.forEach(b => b.addEventListener('input', check));
+    check();
   }
 </script>
 </body>

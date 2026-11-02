@@ -1,21 +1,26 @@
 <?php
 // Backend/sponsorship.php
-// Helpers for "a student can have several sponsors, a sponsor can have several students".
+// Helpers for "a student can have several funders (sponsors), a sponsor can have several students".
 //
-// A sponsorship links ONE sponsor to ONE student and stores the pledge
-// (the most that sponsor promises to give). Status:
+// A sponsorship links ONE sponsor to ONE student. Status:
 //   pending  - the sponsor asked; the student has not answered yet
-//   active   - the student accepted: the sponsor sees the wallet, approves budgets and sends money
+//   active   - linked: the sponsor sees the wallet, funds budgets and sends money
 //   declined - the student said no
 //   ended    - finished (kept for the history)
+// sponsorships.pledge is an optional LIMIT per budget (0 = no limit). Organizations get the
+// program amount as their limit; individual sponsors have no limit.
 //
-// The student still has ONE wallet. All active sponsors pay into it and all of them can see it.
+// How a budget gets funded:
+//   the student submits a budget -> each funder commits a share of it (a % or a fixed amount,
+//   saved in proposal_reviews.commit_amount) -> when the commitments reach 100% the budget is active.
+//   If it stays below 100%, the STUDENT decides: wait, accept the partial funding (and choose which
+//   lines to cut), or cancel the proposal.
 // Usage:  require_once __DIR__ . '/sponsorship.php';
 
 require_once __DIR__ . '/notify.php';
 
 /**
- * The student's sponsors with their pledge and how much each has actually sent.
+ * The student's sponsors, with how much each has sent in total.
  * $activeOnly = false also returns pending/declined/ended ones (for history screens).
  */
 function student_sponsors(mysqli $conn, int $studentId, bool $activeOnly = true): array
@@ -37,20 +42,9 @@ function student_sponsors(mysqli $conn, int $studentId, bool $activeOnly = true)
     return $rows;
 }
 
-/** Total of all active pledges for a student = the most their budget can be. */
-function pledge_total(mysqli $conn, int $studentId): float
-{
-    $stmt = $conn->prepare("SELECT COALESCE(SUM(pledge), 0) AS total FROM sponsorships WHERE student_id = ? AND status = 'active'");
-    $stmt->bind_param('i', $studentId);
-    $stmt->execute();
-    $total = (float) $stmt->get_result()->fetch_assoc()['total'];
-    $stmt->close();
-    return $total;
-}
-
 /**
  * The wallet, if this sponsor ACTIVELY sponsors its student. Returns null otherwise.
- * Includes the student's name and this sponsor's pledge.
+ * Includes the student's name and this sponsor's limit ("pledge", 0 = no limit).
  */
 function sponsor_wallet(mysqli $conn, int $sponsorId, int $walletId): ?array
 {
@@ -66,26 +60,6 @@ function sponsor_wallet(mysqli $conn, int $sponsorId, int $walletId): ?array
     $row = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     return $row ?: null;
-}
-
-/**
- * How much of this sponsor's pledge is already used on this wallet:
- * confirmed M-Pesa funding + payments still waiting for confirmation (last 30 minutes).
- */
-function sponsor_pledge_used(mysqli $conn, int $sponsorId, int $walletId): float
-{
-    $stmt = $conn->prepare(
-        "SELECT
-           (SELECT COALESCE(SUM(amount), 0) FROM transactions
-             WHERE wallet_id = ? AND type = 'funding' AND created_by = ?)
-         + (SELECT COALESCE(SUM(amount), 0) FROM mpesa_payments
-             WHERE wallet_id = ? AND sponsor_id = ? AND status = 'pending' AND created_at >= NOW() - INTERVAL 30 MINUTE) AS used"
-    );
-    $stmt->bind_param('iiii', $walletId, $sponsorId, $walletId, $sponsorId);
-    $stmt->execute();
-    $used = (float) $stmt->get_result()->fetch_assoc()['used'];
-    $stmt->close();
-    return $used;
 }
 
 /** Send the same alert to every active sponsor of a student (optionally skipping one). */
@@ -104,15 +78,27 @@ function notify_sponsors(mysqli $conn, int $studentId, string $type, string $tit
     }
 }
 
+/** Total of a budget proposal. */
+function proposal_total(mysqli $conn, int $proposalId): float
+{
+    $stmt = $conn->prepare('SELECT COALESCE(SUM(proposed_amount), 0) AS total FROM budget_proposal_items WHERE proposal_id = ?');
+    $stmt->bind_param('i', $proposalId);
+    $stmt->execute();
+    $total = (float) $stmt->get_result()->fetch_assoc()['total'];
+    $stmt->close();
+    return $total;
+}
+
 /**
- * Who has approved a budget proposal so far.
- * Returns ['sponsors' => [...active sponsors, each with 'decision' (approved/changes/null)],
- *          'approved' => n, 'needed' => n, 'complete' => bool]
+ * How far a budget proposal is funded.
+ * Returns ['sponsors'  => active sponsors, each with decision (approved/changes/null), commit_amount, share (%)],
+ *         'total'     => budget total, 'committed' => sum of commitments, 'remaining' => still uncovered,
+ *         'percent'   => committed as % of total (0-100), 'complete' => fully covered]
  */
-function proposal_approvals(mysqli $conn, int $proposalId, int $studentId): array
+function proposal_funding(mysqli $conn, int $proposalId, int $studentId): array
 {
     $stmt = $conn->prepare(
-        "SELECT sp.sponsor_id, u.full_name, r.decision, r.feedback, r.created_at AS decided_at
+        "SELECT sp.sponsor_id, sp.pledge, u.full_name, r.decision, r.commit_amount, r.feedback, r.created_at AS decided_at
          FROM sponsorships sp
          JOIN users u ON u.id = sp.sponsor_id
          LEFT JOIN proposal_reviews r ON r.proposal_id = ? AND r.sponsor_id = sp.sponsor_id
@@ -124,11 +110,122 @@ function proposal_approvals(mysqli $conn, int $proposalId, int $studentId): arra
     $sponsors = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 
-    $approved = count(array_filter($sponsors, fn($s) => $s['decision'] === 'approved'));
+    $total     = proposal_total($conn, $proposalId);
+    $committed = 0.0;
+    foreach ($sponsors as &$s) {
+        $s['commit_amount'] = $s['decision'] === 'approved' ? (float) $s['commit_amount'] : 0.0;
+        $s['share']         = $total > 0 ? round($s['commit_amount'] / $total * 100, 1) : 0;
+        $committed         += $s['commit_amount'];
+    }
+    unset($s);
+    $committed = round($committed, 2);
+
     return [
-        'sponsors' => $sponsors,
-        'approved' => $approved,
-        'needed'   => count($sponsors),
-        'complete' => $sponsors && $approved === count($sponsors),
+        'sponsors'  => $sponsors,
+        'total'     => $total,
+        'committed' => $committed,
+        'remaining' => max(0, round($total - $committed, 2)),
+        'percent'   => $total > 0 ? min(100, round($committed / $total * 100)) : 0,
+        'complete'  => $total > 0 && $committed >= $total - 0.005,
     ];
+}
+
+/**
+ * This sponsor's part of the student's CURRENT budget (the latest pending or approved proposal):
+ * ['proposal_id', 'status', 'total', 'committed' (this sponsor), 'sent' (since that budget was submitted),
+ *  'to_send' (still to send)] or null when there is no current budget or no commitment from this sponsor.
+ */
+function sponsor_current_share(mysqli $conn, int $sponsorId, int $walletId): ?array
+{
+    $stmt = $conn->prepare(
+        "SELECT p.id, p.status, p.created_at, r.commit_amount
+         FROM budget_proposals p
+         LEFT JOIN proposal_reviews r ON r.proposal_id = p.id AND r.sponsor_id = ? AND r.decision = 'approved'
+         WHERE p.wallet_id = ? AND p.status IN ('pending', 'approved')
+         ORDER BY p.id DESC LIMIT 1"
+    );
+    $stmt->bind_param('ii', $sponsorId, $walletId);
+    $stmt->execute();
+    $p = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$p || $p['commit_amount'] === null) {
+        return null;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT COALESCE(SUM(amount), 0) AS sent FROM transactions
+         WHERE wallet_id = ? AND type = 'funding' AND created_by = ? AND created_at >= ?"
+    );
+    $stmt->bind_param('iis', $walletId, $sponsorId, $p['created_at']);
+    $stmt->execute();
+    $sent = (float) $stmt->get_result()->fetch_assoc()['sent'];
+    $stmt->close();
+
+    $committed = (float) $p['commit_amount'];
+    return [
+        'proposal_id' => (int) $p['id'],
+        'status'      => $p['status'],
+        'total'       => proposal_total($conn, (int) $p['id']),
+        'committed'   => $committed,
+        'sent'        => $sent,
+        'to_send'     => max(0, round($committed - $sent, 2)),
+    ];
+}
+
+/**
+ * Make a fully funded (or student-accepted) proposal the active budget:
+ * copy its amounts into budget_allocations and mark it approved. Call inside a transaction.
+ */
+function activate_budget(mysqli $conn, int $proposalId, int $walletId, ?int $reviewerId, ?string $note): void
+{
+    $stmt = $conn->prepare('SELECT category, proposed_amount FROM budget_proposal_items WHERE proposal_id = ?');
+    $stmt->bind_param('i', $proposalId);
+    $stmt->execute();
+    $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    // One row per wallet + category. If it already exists, its allocated amount is replaced; "spent" is kept.
+    $stmt = $conn->prepare(
+        'INSERT INTO budget_allocations (wallet_id, category, allocated, spent, updated_at)
+         VALUES (?, ?, ?, 0, NOW())
+         ON DUPLICATE KEY UPDATE allocated = VALUES(allocated), updated_at = NOW()'
+    );
+    $kept = [];
+    foreach ($items as $it) {
+        if ((float) $it['proposed_amount'] <= 0) {
+            continue;
+        }
+        $stmt->bind_param('iss', $walletId, $it['category'], $it['proposed_amount']);
+        $stmt->execute();
+        $kept[] = $it['category'];
+    }
+    $stmt->close();
+
+    // Lines from an older budget that are not in this one: remove them if nothing was spent,
+    // otherwise keep the history with 0 allocated.
+    $stmt = $conn->prepare('SELECT id, category, spent FROM budget_allocations WHERE wallet_id = ?');
+    $stmt->bind_param('i', $walletId);
+    $stmt->execute();
+    $existing = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    foreach ($existing as $row) {
+        if (in_array($row['category'], $kept, true)) {
+            continue;
+        }
+        $sql = (float) $row['spent'] > 0
+            ? 'UPDATE budget_allocations SET allocated = 0, updated_at = NOW() WHERE id = ?'
+            : 'DELETE FROM budget_allocations WHERE id = ?';
+        $stmt = $conn->prepare($sql);
+        $rowId = (int) $row['id'];
+        $stmt->bind_param('i', $rowId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $stmt = $conn->prepare(
+        "UPDATE budget_proposals SET status = 'approved', sponsor_feedback = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?"
+    );
+    $stmt->bind_param('sii', $note, $reviewerId, $proposalId);
+    $stmt->execute();
+    $stmt->close();
 }

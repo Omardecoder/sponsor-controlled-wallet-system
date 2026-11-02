@@ -110,7 +110,7 @@ $active = 'applications';
       <div class="page-head">
         <div>
           <h2>Waiting for your decision (<?= $waiting ?>)</h2>
-          <p class="muted">Read each student's reason and documents. Accepting links the student to you with the program amount as your pledge.</p>
+          <p class="muted">Read each student's reason and documents. Accepting links the student to you; you can then fund up to the program amount of each budget they send.</p>
         </div>
       </div>
 
@@ -181,7 +181,7 @@ $active = 'applications';
                 <?php if ($full): ?><p class="alert error">All places in this program are filled.</p><?php endif; ?>
                 <div class="row">
                   <button type="submit" name="decision" value="accept" class="btn" <?= $full ? 'disabled' : '' ?>
-                          onclick="return confirm('Accept <?= htmlspecialchars(addslashes($a['student_name'])) ?>? They will be linked to you with a pledge of KES <?= number_format((float) $a['amount']) ?>.');">Accept</button>
+                          onclick="return confirm('Accept <?= htmlspecialchars(addslashes($a['student_name'])) ?>? They will be linked to you, and you can fund up to KES <?= number_format((float) $a['amount']) ?> of each budget.');">Accept</button>
                   <button type="submit" name="decision" value="reject" class="btn btn-outline"
                           onclick="return confirm('Reject this application?');">Reject</button>
                 </div>

@@ -51,7 +51,6 @@ $sidebarLinks = [
 
   <div class="sidebar-foot">
     <ul class="nav">
-      <li><span class="soon"><?= sw_icon('profile') ?>Profile<span class="tag">Soon</span></span></li>
       <li><a href="../Backend/logout.php"><?= sw_icon('logout') ?>Log out</a></li>
     </ul>
   </div>

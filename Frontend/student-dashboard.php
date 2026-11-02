@@ -1,6 +1,6 @@
 <?php
 // Frontend/student-dashboard.php
-// Student overview: sponsor requests, sponsors and pledges, balance, budget, transactions.
+// Student overview: sponsor requests, funders and their shares, balance, budget, transactions.
 // A student can have several sponsors; they all pay into this one wallet.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
@@ -25,11 +25,11 @@ $stmt->close();
 $allLinks  = student_sponsors($conn, $studentId, false);
 $sponsors  = array_values(array_filter($allLinks, fn($s) => $s['status'] === 'active'));
 $requests  = array_values(array_filter($allLinks, fn($s) => $s['status'] === 'pending'));
-$pledged   = array_sum(array_column($sponsors, 'pledge'));
 $sponsorNames = implode(' & ', array_column($sponsors, 'full_name'));
 
 $totals     = ['received' => 0, 'spent' => 0];
-$approvals  = null;
+$funding    = null;   // funding status of a budget that is waiting
+$shares     = [];     // sponsor_id => that funder's part of the current budget
 $budgetRows = [];
 $proposal   = null;
 $recent     = [];
@@ -79,7 +79,7 @@ if ($wallet) {
     $proposal = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if ($proposal && $proposal['status'] === 'pending') {
-        $approvals = proposal_approvals($conn, (int) $proposal['id'], $studentId);
+        $funding = proposal_funding($conn, (int) $proposal['id'], $studentId);
     }
 
     // Recent transactions
@@ -170,7 +170,7 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
           <?php foreach ($requests as $r): ?>
             <div class="request-row">
               <div>
-                <strong><?= htmlspecialchars($r['full_name']) ?></strong> wants to sponsor you with up to <strong><?= ksh($r['pledge']) ?></strong>.
+                <strong><?= htmlspecialchars($r['full_name']) ?></strong> wants to sponsor you<?= (float) $r['pledge'] > 0 ? ' with up to <strong>' . ksh($r['pledge']) . '</strong> per budget' : '' ?>.
                 <?php if ($r['message']): ?><div class="muted">“<?= htmlspecialchars($r['message']) ?>”</div><?php endif; ?>
                 <div class="muted small">If you accept, they can see your wallet and spending, and must approve your budgets.</div>
               </div>
@@ -203,10 +203,9 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
         <?php // Status of the latest budget proposal ?>
         <?php if ($proposal && $proposal['status'] === 'pending'): ?>
           <div class="notice">
-            <?php $waitingFor = array_column(array_filter($approvals['sponsors'], fn($s) => $s['decision'] !== 'approved'), 'full_name'); ?>
-            <span>Your budget proposal of <strong><?= ksh($proposal['total']) ?></strong> is waiting for approval
-              <?php if ($approvals['needed'] > 1): ?>(<?= $approvals['approved'] ?> of <?= $approvals['needed'] ?> sponsors approved)<?php endif; ?>.
-              <?php if ($waitingFor): ?><br><span class="muted">Waiting for <?= htmlspecialchars(implode(', ', $waitingFor)) ?>.</span><?php endif; ?></span>
+            <span>Your budget of <strong><?= ksh($proposal['total']) ?></strong> is <strong><?= $funding['percent'] ?>% funded</strong>
+              (<?= ksh($funding['committed']) ?> committed, <?= ksh($funding['remaining']) ?> still uncovered).
+              <br><span class="muted">You can wait for the rest, or start with what is funded on your budget page.</span></span>
             <a class="btn btn-accent" href="student-budget.php">View</a>
           </div>
         <?php elseif ($proposal && $proposal['status'] === 'changes_requested'): ?>
@@ -244,27 +243,32 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
           </div>
         </section>
 
-        <!-- My sponsors and their pledges -->
+        <!-- My funders and their part of the current budget -->
         <section class="card" id="sponsors">
           <div class="card-head">
-            <h3>My sponsors</h3>
-            <span class="muted small">Your budget can total up to <?= ksh($pledged) ?></span>
+            <h3>My funders</h3>
+            <span class="muted small">Their part of your current budget</span>
           </div>
           <div class="bars">
-            <?php foreach ($sponsors as $s):
-                $pledge = (float) $s['pledge'];
-                $sent   = (float) $s['funded'];
-                $pct    = $pledge > 0 ? min(100, round($sent / $pledge * 100)) : 0;
+            <?php foreach ($sponsors as $i => $s):
+                $share = sponsor_current_share($conn, (int) $s['sponsor_id'], (int) $wallet['id']);
+                $pct   = $share && $share['committed'] > 0 ? min(100, round($share['sent'] / $share['committed'] * 100)) : 0;
             ?>
               <div>
                 <div class="bar-top">
-                  <b><?= htmlspecialchars($s['full_name']) ?></b>
-                  <span><?= ksh($sent) ?> sent of <?= ksh($pledge) ?> pledged</span>
+                  <b>Funder <?= $i + 1 ?>: <?= htmlspecialchars($s['full_name']) ?></b>
+                  <span>
+                    <?php if ($share): ?>
+                      <?= ksh($share['sent']) ?> sent of <?= ksh($share['committed']) ?> (<?= $share['total'] > 0 ? round($share['committed'] / $share['total'] * 100, 1) : 0 ?>% of the budget)
+                    <?php else: ?>
+                      No share of your current budget yet
+                    <?php endif; ?>
+                  </span>
                 </div>
-                <div class="bar-track" role="img" aria-label="<?= $pct ?>% of pledge sent">
+                <div class="bar-track" role="img" aria-label="<?= $pct ?>% of their share sent">
                   <div class="bar-fill" style="width: <?= $pct ?>%"></div>
                 </div>
-                <div class="bar-sub"><?= $pledged > 0 ? round($pledge / $pledged * 100) : 0 ?>% of your total support</div>
+                <div class="bar-sub"><?= ksh($s['funded']) ?> sent to you in total<?= (float) $s['pledge'] > 0 ? ' · limit ' . ksh($s['pledge']) . ' per budget' : '' ?></div>
               </div>
             <?php endforeach; ?>
           </div>

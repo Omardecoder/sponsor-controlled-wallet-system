@@ -4,7 +4,8 @@
 //
 // Flow: an ORGANIZATION (a sponsor account with sponsor_type = 'organization', verified by the admin)
 // posts a program -> students apply with documents -> the organization accepts an application ->
-// a sponsorship is created automatically (pledge = the program amount) and the student gets a wallet.
+// a sponsorship is created automatically (the program amount is the organization's limit per budget)
+// and the student gets a wallet.
 // Usage:  require_once __DIR__ . '/programs.php';
 
 // Documents an organization can ask for. code => label

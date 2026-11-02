@@ -1,6 +1,7 @@
 <?php
 // Frontend/sponsor-dashboard.php
-// Sponsor overview: totals, budget usage, send funds, recent transactions, students and pledges.
+// Sponsor overview: totals, budget usage, send funds, recent transactions, students and this
+// sponsor's share of each student's current budget.
 // A student can have several sponsors: this page shows only the students THIS sponsor supports.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
@@ -35,8 +36,13 @@ $stmt->execute();
 $students = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// Students whose wallet this sponsor can fund (accepted, wallet exists)
+// Students whose wallet this sponsor can fund (accepted, wallet exists),
+// with this sponsor's share of their current budget (committed / sent / still to send)
 $wallets = array_values(array_filter($students, fn($s) => $s['link_status'] === 'active' && $s['id'] !== null));
+$shareOf = [];
+foreach ($wallets as $w) {
+    $shareOf[(int) $w['id']] = sponsor_current_share($conn, $sponsorId, (int) $w['id']);
+}
 
 // ---- Summary figures ----
 // Funds sent = what THIS sponsor sent. Spending = by the students this sponsor supports.
@@ -240,12 +246,12 @@ $active = 'dashboard';
                 <label for="wallet_id">Student</label>
                 <select id="wallet_id" name="wallet_id" required>
                   <option value="" selected disabled>Choose a student…</option>
-                  <?php foreach ($wallets as $w):
-                      $left = max(0, (float) $w['pledge'] - (float) $w['my_funded']);
-                      $can  = $w['status'] === 'active' && $left >= 1;
-                  ?>
-                    <option value="<?= (int) $w['id'] ?>" <?= $can ? '' : 'disabled' ?>>
-                      <?= htmlspecialchars($w['full_name']) ?> — <?= $w['status'] !== 'active' ? 'frozen' : 'KES ' . number_format($left) . ' left of your pledge' ?>
+                  <?php foreach ($wallets as $w): $sh = $shareOf[(int) $w['id']]; ?>
+                    <option value="<?= (int) $w['id'] ?>" <?= $w['status'] === 'active' ? '' : 'disabled' ?>
+                            data-to-send="<?= $sh ? (int) ceil($sh['to_send']) : 0 ?>">
+                      <?= htmlspecialchars($w['full_name']) ?> — <?= $w['status'] !== 'active' ? 'frozen'
+                          : ($sh ? ($sh['to_send'] > 0 ? 'KES ' . number_format($sh['to_send']) . ' still to send of your share' : 'your share is fully sent')
+                                 : 'no share committed yet') ?>
                     </option>
                   <?php endforeach; ?>
                 </select>
@@ -263,7 +269,17 @@ $active = 'dashboard';
                 <input type="text" id="note" name="note" maxlength="255" placeholder="e.g. Term 2 upkeep">
               </div>
               <button type="submit" class="btn btn-block"><?= sw_icon('send') ?>Pay with M-Pesa</button>
-              <p class="muted small">You can send up to your pledge for each student. You'll get an M-Pesa prompt on this phone; the wallet is credited only after M-Pesa confirms.</p>
+              <p class="muted small">The amount fills in with what you still owe of your share of the student's current budget. You'll get an M-Pesa prompt on this phone; the wallet is credited only after M-Pesa confirms.</p>
+              <script>
+                // Pre-fill the amount with what is still to send for the chosen student
+                (function () {
+                  const sel = document.getElementById('wallet_id'), amt = document.getElementById('amount');
+                  if (sel && amt) sel.addEventListener('change', () => {
+                    const v = parseInt(sel.selectedOptions[0].dataset.toSend || '0', 10);
+                    if (v > 0) amt.value = Math.min(v, 250000);
+                  });
+                })();
+              </script>
             </form>
           <?php endif; ?>
         </section>
@@ -310,16 +326,12 @@ $active = 'dashboard';
             <input type="text" id="student_identifier" name="student_identifier" placeholder="student@example.com or 0712 345 678" required>
           </div>
           <div>
-            <label for="pledge">Your pledge (KES)</label>
-            <input type="number" id="pledge" name="pledge" min="1" step="1" placeholder="e.g. 60000" required>
-          </div>
-          <div>
             <label for="message">Message (optional)</label>
             <input type="text" id="message" name="message" maxlength="255" placeholder="e.g. Your upkeep for this semester">
           </div>
           <button type="submit" class="btn">Send request</button>
         </form>
-        <p class="muted small" style="margin-top:6px;">Your pledge is the most you will give this student. Their budget can't be more than the total of all their sponsors' pledges. The student must accept before you are linked.</p>
+        <p class="muted small" style="margin-top:6px;">The student must accept before you are linked. After that, each budget they send shows up under Budget Proposals, where you choose how much of it to fund.</p>
 
         <?php if (!$students): ?>
           <p class="empty" style="margin-top:14px;">No students yet.</p>
@@ -327,7 +339,7 @@ $active = 'dashboard';
           <div class="table-wrap" style="margin-top:18px;">
             <table>
               <thead>
-                <tr><th>Student</th><th>Status</th><th class="num">Your pledge (KES)</th><th class="num">You sent</th><th class="num">Balance</th><th>Pledge</th></tr>
+                <tr><th>Student</th><th>Status</th><th class="num">Your share of current budget</th><th class="num">Sent</th><th class="num">Still to send</th><th class="num">Balance</th><th></th></tr>
               </thead>
               <tbody>
                 <?php foreach ($students as $s): $isActive = $s['link_status'] === 'active'; ?>
@@ -344,16 +356,19 @@ $active = 'dashboard';
                         <span class="pill <?= $s['status'] === 'active' ? 'green' : 'red' ?>"><?= $s['status'] === 'active' ? 'Active' : 'Frozen' ?></span>
                       <?php endif; ?>
                     </td>
-                    <td class="num"><strong><?= kes2($s['pledge']) ?></strong></td>
-                    <td class="num"><?= $isActive ? kes2($s['my_funded']) : '—' ?></td>
+                    <?php $sh = ($isActive && $s['id'] !== null) ? ($shareOf[(int) $s['id']] ?? null) : null; ?>
+                    <td class="num">
+                      <?php if ($sh): ?>
+                        <strong><?= kes2($sh['committed']) ?></strong>
+                        <div class="muted small"><?= $sh['total'] > 0 ? round($sh['committed'] / $sh['total'] * 100, 1) : 0 ?>% of <?= kes2($sh['total']) ?><?= $sh['status'] === 'pending' ? ' · waiting' : '' ?></div>
+                      <?php else: ?>
+                        <span class="muted">—</span>
+                      <?php endif; ?>
+                    </td>
+                    <td class="num"><?= $sh ? kes2($sh['sent']) : '—' ?></td>
+                    <td class="num"><?= $sh ? '<strong>' . kes2($sh['to_send']) . '</strong>' : '—' ?></td>
                     <td class="num"><?= $isActive && $s['id'] !== null ? kes2($s['balance']) : '—' ?></td>
                     <td>
-                      <form action="../Backend/sponsorship_action.php" method="post" class="inline-action">
-                        <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
-                        <input type="hidden" name="action" value="pledge">
-                        <input type="number" name="pledge" min="1" step="1" value="<?= (int) round((float) $s['pledge']) ?>" aria-label="New pledge for <?= htmlspecialchars($s['full_name']) ?>" class="pledge-input">
-                        <button type="submit" class="btn btn-outline btn-sm">Save</button>
-                      </form>
                       <?php if (!$isActive): ?>
                         <form action="../Backend/sponsorship_action.php" method="post" class="inline-action" onsubmit="return confirm('Cancel your request to <?= htmlspecialchars(addslashes($s['full_name'])) ?>?');">
                           <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
