@@ -1,18 +1,17 @@
 <?php
 // Backend/review_budget_proposal.php
-// One of the student's sponsors reviews a budget proposal. A student can have several sponsors,
-// and EVERY active sponsor must approve before the budget takes effect.
+// A funder (sponsor) responds to a student's budget proposal. A student can have several funders.
 //
-// decision = approve -> this sponsor's approval is recorded (proposal_reviews).
-//                       When the last sponsor approves, the proposal becomes "approved" and its
-//                       amounts are copied into budget_allocations.
-//                       If this sponsor entered a top-up, an M-Pesa prompt is sent to their phone
-//                       (up to what is left of their pledge); the wallet is credited only when
-//                       Safaricom confirms (mpesa_callback.php).
+// decision = commit  -> the funder commits a share of the budget: a percentage (e.g. 50%) or a
+//                       fixed amount (e.g. KSh 50,000). Saved in proposal_reviews.commit_amount.
+//                       Commitments can never add up to more than the budget.
+//                       When the commitments reach 100%, the budget becomes active
+//                       (its amounts are copied into budget_allocations).
+//                       Optionally the funder pays their share now through M-Pesa; the wallet is
+//                       credited only when Safaricom confirms (mpesa_callback.php).
 // decision = changes -> the proposal goes back to the student ("changes_requested") with feedback.
-//                       One sponsor asking for changes is enough.
-//
-// Everything that changes the budget happens in one database transaction.
+//                       One funder asking for changes is enough.
+// If the budget stays below 100%, the student decides what to do (see budget_action.php).
 
 session_start();
 require_once __DIR__ . '/db.php';
@@ -21,7 +20,7 @@ require_once __DIR__ . '/sponsorship.php';
 require_role('sponsor');
 
 // M-Pesa is loaded only when this computer has an mpesa_config.php file.
-// Without it, approving (with no top-up) and requesting changes still work.
+// Without it, committing (without paying now) and requesting changes still work.
 define('MPESA_READY', is_file(__DIR__ . '/mpesa_config.php'));
 if (MPESA_READY) {
     require_once __DIR__ . '/mpesa_funding.php';
@@ -35,7 +34,7 @@ function back(string $type, string $message): void
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    back('error', 'Use the form to review a proposal.');
+    back('error', 'Use the form to respond to a budget.');
 }
 
 $sponsorId   = (int) $_SESSION['user_id'];
@@ -43,11 +42,13 @@ $sponsorName = $_SESSION['full_name'];
 $proposalId  = (int) ($_POST['proposal_id'] ?? 0);
 $decision    = $_POST['decision'] ?? '';
 $feedback    = trim($_POST['feedback'] ?? '');
-$fundRaw     = str_replace([',', ' '], '', trim($_POST['fund_amount'] ?? '0'));
+$commitType  = ($_POST['commit_type'] ?? 'percent') === 'amount' ? 'amount' : 'percent';
+$commitRaw   = str_replace([',', ' ', '%'], '', trim($_POST['commit_value'] ?? ''));
+$payNow      = ($_POST['pay_now'] ?? '') === '1';
 $phoneIn     = $_POST['phone'] ?? '';
 
-if (!in_array($decision, ['approve', 'changes'], true)) {
-    back('error', 'Choose Approve or Request changes.');
+if (!in_array($decision, ['commit', 'changes'], true)) {
+    back('error', 'Choose Fund this budget or Request changes.');
 }
 if ($decision === 'changes' && $feedback === '') {
     back('error', 'Tell the student what to change before sending it back.');
@@ -55,41 +56,39 @@ if ($decision === 'changes' && $feedback === '') {
 if (mb_strlen($feedback) > 1000) {
     back('error', 'Feedback must be 1000 characters or fewer.');
 }
-
-// M-Pesa top-up when approving (0 = approve without topping up). Whole shillings only.
-$fundAmount = 0;
-$phone      = null;
-if ($decision === 'approve') {
-    if ($fundRaw === '') {
-        $fundRaw = '0';
+if ($decision === 'commit') {
+    $pattern = $commitType === 'percent' ? '/^\d{1,3}(\.\d{1,2})?$/' : '/^\d{1,9}(\.\d{1,2})?$/';
+    if (!preg_match($pattern, $commitRaw) || (float) $commitRaw <= 0) {
+        back('error', $commitType === 'percent'
+            ? 'Enter the share you will fund as a percentage, for example 50.'
+            : 'Enter the amount you will fund in shillings, for example 50000.');
     }
-    if (!preg_match('/^\d{1,7}$/', $fundRaw)) {
-        back('error', 'Enter the top-up as a whole amount in shillings, for example 1500. Use 0 to approve without topping up.');
-    }
-    $fundAmount = (int) $fundRaw;
-    if ($fundAmount > 250000) {
-        back('error', 'M-Pesa allows at most KSh 250,000 per transaction.');
-    }
-    if ($fundAmount > 0) {
-        if (!MPESA_READY) {
-            back('error', 'M-Pesa is not set up on this computer. Enter 0 as the top-up to approve without sending money.');
-        }
-        $phone = mpesa_phone($phoneIn);
-        if ($phone === null) {
-            back('error', 'Enter a valid Safaricom number to pay the top-up from, for example 0712 345 678.');
-        }
+    if ($commitType === 'percent' && (float) $commitRaw > 100) {
+        back('error', 'A share cannot be more than 100%.');
     }
 }
 
-$complete = false;   // did this approval complete the set?
+$phone = null;
+if ($decision === 'commit' && $payNow) {
+    if (!MPESA_READY) {
+        back('error', 'M-Pesa is not set up on this computer. Untick "Pay my share now" and send the money later.');
+    }
+    $phone = mpesa_phone($phoneIn);
+    if ($phone === null) {
+        back('error', 'Enter a valid Safaricom number to pay from, for example 0712 345 678.');
+    }
+}
+
+$complete = false;
+$myAmount = 0.0;
 try {
     $conn->begin_transaction();
 
-    // The proposal must belong to a student this sponsor ACTIVELY sponsors. Lock it,
-    // so two sponsors deciding at the same moment are handled one after the other.
+    // The proposal must belong to a student this sponsor ACTIVELY sponsors. Lock it, so two funders
+    // committing at the same moment are handled one after the other (no going over 100%).
     $stmt = $conn->prepare(
         "SELECT p.id, p.status, w.id AS wallet_id, w.status AS wallet_status, w.student_id,
-                u.full_name AS student_name, sp.pledge
+                u.full_name AS student_name, sp.pledge AS limit_amount
          FROM budget_proposals p
          JOIN wallets w ON w.id = p.wallet_id
          JOIN users u   ON u.id = w.student_id
@@ -108,13 +107,12 @@ try {
     }
     if ($proposal['status'] !== 'pending') {
         $conn->rollback();
-        back('error', 'This proposal has already been decided.');
+        back('error', 'This budget has already been decided.');
     }
-
     $walletId  = (int) $proposal['wallet_id'];
     $studentId = (int) $proposal['student_id'];
 
-    // Each sponsor decides once per proposal
+    // Each funder responds once per proposal
     $stmt = $conn->prepare('SELECT decision FROM proposal_reviews WHERE proposal_id = ? AND sponsor_id = ?');
     $stmt->bind_param('ii', $proposalId, $sponsorId);
     $stmt->execute();
@@ -122,106 +120,69 @@ try {
     $stmt->close();
     if ($mine) {
         $conn->rollback();
-        back('error', 'You have already approved this proposal. It is waiting for the other sponsors.');
+        back('error', 'You have already responded to this budget.');
     }
 
-    // A top-up must fit in what is left of this sponsor's pledge
-    if ($fundAmount > 0) {
-        if ($proposal['wallet_status'] !== 'active') {
-            $conn->rollback();
-            back('error', 'This wallet is frozen, so it can\'t be topped up. Approve with 0, or unfreeze the wallet first.');
-        }
-        $left = (float) $proposal['pledge'] - sponsor_pledge_used($conn, $sponsorId, $walletId);
-        if ($fundAmount > $left) {
-            $conn->rollback();
-            back('error', 'The top-up is more than what is left of your pledge (KSh ' . number_format(max(0, $left))
-                . '). Lower it, approve with 0, or raise your pledge on the dashboard first.');
-        }
-    }
+    $funding = proposal_funding($conn, $proposalId, $studentId);
 
-    // 1. Record this sponsor's decision
-    $reviewDecision = $decision === 'approve' ? 'approved' : 'changes';
-    $feedbackValue  = $feedback !== '' ? $feedback : null;
-    $stmt = $conn->prepare('INSERT INTO proposal_reviews (proposal_id, sponsor_id, decision, feedback) VALUES (?, ?, ?, ?)');
-    $stmt->bind_param('iiss', $proposalId, $sponsorId, $reviewDecision, $feedbackValue);
-    $stmt->execute();
-    $stmt->close();
+    if ($decision === 'commit') {
+        // Turn the % or amount into shillings, and check it fits
+        $myAmount = $commitType === 'percent'
+            ? round($funding['total'] * (float) $commitRaw / 100, 2)
+            : round((float) $commitRaw, 2);
+        if ($myAmount > $funding['remaining'] + 0.005) {
+            $conn->rollback();
+            back('error', 'Only KSh ' . number_format($funding['remaining'], 2) . ' ('
+                . ($funding['total'] > 0 ? round($funding['remaining'] / $funding['total'] * 100, 1) : 0)
+                . '%) of this budget is still uncovered. Commit that much or less.');
+        }
+        $myAmount = min($myAmount, $funding['remaining']);
+        $limit = (float) $proposal['limit_amount'];   // organizations: the program amount
+        if ($limit > 0 && $myAmount > $limit + 0.005) {
+            $conn->rollback();
+            back('error', 'Your limit for ' . $proposal['student_name'] . ' is KSh ' . number_format($limit) . ' per budget. Commit that much or less.');
+        }
+        if ($payNow && $proposal['wallet_status'] !== 'active') {
+            $conn->rollback();
+            back('error', 'This wallet is frozen, so it can\'t be funded now. Untick "Pay my share now".');
+        }
+        if ($payNow && ceil($myAmount) > 250000) {
+            $conn->rollback();
+            back('error', 'M-Pesa allows at most KSh 250,000 per payment. Untick "Pay my share now" and send it in parts from the dashboard.');
+        }
 
-    if ($decision === 'changes') {
-        // 2a. One sponsor asking for changes sends it back to the student
+        $feedbackValue = $feedback !== '' ? $feedback : null;
+        $amountStr = number_format($myAmount, 2, '.', '');
         $stmt = $conn->prepare(
-            "UPDATE budget_proposals
-             SET status = 'changes_requested', sponsor_feedback = ?, reviewed_by = ?, reviewed_at = NOW()
-             WHERE id = ?"
+            "INSERT INTO proposal_reviews (proposal_id, sponsor_id, decision, commit_amount, feedback) VALUES (?, ?, 'approved', ?, ?)"
+        );
+        $stmt->bind_param('iiss', $proposalId, $sponsorId, $amountStr, $feedbackValue);
+        $stmt->execute();
+        $stmt->close();
+
+        // Fully covered now? Then the budget becomes active.
+        $funding  = proposal_funding($conn, $proposalId, $studentId);
+        $complete = $funding['complete'];
+        if ($complete) {
+            activate_budget($conn, $proposalId, $walletId, $sponsorId, $feedbackValue);
+        }
+    } else {
+        // One funder asking for changes sends it back to the student
+        $feedbackValue = $feedback;
+        $stmt = $conn->prepare("INSERT INTO proposal_reviews (proposal_id, sponsor_id, decision, feedback) VALUES (?, ?, 'changes', ?)");
+        $stmt->bind_param('iis', $proposalId, $sponsorId, $feedbackValue);
+        $stmt->execute();
+        $stmt->close();
+
+        $stmt = $conn->prepare(
+            "UPDATE budget_proposals SET status = 'changes_requested', sponsor_feedback = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?"
         );
         $stmt->bind_param('sii', $feedbackValue, $sponsorId, $proposalId);
         $stmt->execute();
         $stmt->close();
-    } else {
-        // 2b. Approved by everyone now?
-        $state    = proposal_approvals($conn, $proposalId, $studentId);
-        $complete = $state['complete'];
-
-        if ($complete) {
-            // Copy the amounts into budget_allocations (one row per wallet + category).
-            // If the category already exists, its allocated amount is replaced; "spent" is kept.
-            $stmt = $conn->prepare('SELECT category, proposed_amount FROM budget_proposal_items WHERE proposal_id = ?');
-            $stmt->bind_param('i', $proposalId);
-            $stmt->execute();
-            $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $stmt->close();
-
-            $stmt = $conn->prepare(
-                'INSERT INTO budget_allocations (wallet_id, category, allocated, spent, updated_at)
-                 VALUES (?, ?, ?, 0, NOW())
-                 ON DUPLICATE KEY UPDATE allocated = VALUES(allocated), updated_at = NOW()'
-            );
-            $approvedCategories = [];
-            foreach ($items as $it) {
-                if ((float) $it['proposed_amount'] <= 0) {
-                    continue;
-                }
-                $stmt->bind_param('iss', $walletId, $it['category'], $it['proposed_amount']);
-                $stmt->execute();
-                $approvedCategories[] = $it['category'];
-            }
-            $stmt->close();
-
-            // Categories from an older budget that are NOT in this one:
-            // remove them if nothing was spent, otherwise keep the history with 0 allocated.
-            $stmt = $conn->prepare('SELECT id, category, spent FROM budget_allocations WHERE wallet_id = ?');
-            $stmt->bind_param('i', $walletId);
-            $stmt->execute();
-            $existing = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $stmt->close();
-
-            foreach ($existing as $row) {
-                if (in_array($row['category'], $approvedCategories, true)) {
-                    continue;
-                }
-                $sql = (float) $row['spent'] > 0
-                    ? 'UPDATE budget_allocations SET allocated = 0, updated_at = NOW() WHERE id = ?'
-                    : 'DELETE FROM budget_allocations WHERE id = ?';
-                $stmt = $conn->prepare($sql);
-                $rowId = (int) $row['id'];
-                $stmt->bind_param('i', $rowId);
-                $stmt->execute();
-                $stmt->close();
-            }
-
-            $stmt = $conn->prepare(
-                "UPDATE budget_proposals
-                 SET status = 'approved', sponsor_feedback = ?, reviewed_by = ?, reviewed_at = NOW()
-                 WHERE id = ?"
-            );
-            $stmt->bind_param('sii', $feedbackValue, $sponsorId, $proposalId);
-            $stmt->execute();
-            $stmt->close();
-        }
     }
 
     $conn->commit();
-
 } catch (Throwable $e) {
     try { $conn->rollback(); } catch (Throwable $ignored) {}
     error_log('Review budget proposal failed: ' . $e->getMessage());
@@ -231,7 +192,6 @@ try {
 // ---- Alerts ----
 $studentName = $proposal['student_name'];
 $note        = $feedback !== '' ? ' Note: "' . $feedback . '"' : '';
-$topupText   = $fundAmount > 0 ? ' A top-up of KSh ' . number_format($fundAmount) . ' from ' . $sponsorName . ' is on the way via M-Pesa.' : '';
 
 if ($decision === 'changes') {
     notify($conn, $studentId, 'budget_changes', 'Changes requested on your budget',
@@ -241,28 +201,31 @@ if ($decision === 'changes') {
     back('success', 'Sent back to ' . $studentName . ' with your feedback.');
 }
 
+$share = $funding['total'] > 0 ? round($myAmount / $funding['total'] * 100, 1) : 0;
+$mine  = 'KSh ' . number_format($myAmount, 2) . ' (' . $share . '%)';
 if ($complete) {
-    notify($conn, $studentId, 'budget_approved', 'Your budget was approved',
-        'All your sponsors approved your budget. ' . $sponsorName . ' gave the final approval.' . $topupText . $note, 'student-dashboard.php');
-    notify_sponsors($conn, $studentId, 'budget_approved', $studentName . '\'s budget is approved',
-        'Every sponsor has approved it. ' . $sponsorName . ' gave the final approval.', 'sponsor-proposals.php', null, $sponsorId);
-    $doneMessage = 'Approved. Every sponsor has now approved ' . $studentName . '\'s budget, so it is active.';
+    notify($conn, $studentId, 'budget_approved', 'Your budget is fully funded',
+        $sponsorName . ' committed ' . $mine . ', so your budget is now 100% covered and active.' . $note, 'student-dashboard.php');
+    notify_sponsors($conn, $studentId, 'budget_approved', $studentName . '\'s budget is fully funded',
+        $sponsorName . ' committed the last ' . $mine . '. The budget is active.', 'sponsor-proposals.php', null, $sponsorId);
+    $doneMessage = 'You committed ' . $mine . '. ' . $studentName . '\'s budget is now fully funded and active.';
 } else {
-    $waiting = array_column(array_filter($state['sponsors'], fn($s) => $s['decision'] !== 'approved'), 'full_name');
-    notify($conn, $studentId, 'budget_partly_approved', $sponsorName . ' approved your budget',
-        'Still waiting for ' . implode(', ', $waiting) . '.' . $topupText . $note, 'student-budget.php');
-    $doneMessage = 'Your approval is recorded. ' . $studentName . '\'s budget is still waiting for ' . implode(', ', $waiting) . '.';
+    notify($conn, $studentId, 'budget_partly_approved', $sponsorName . ' will fund ' . $mine . ' of your budget',
+        'Your budget is now ' . $funding['percent'] . '% funded. KSh ' . number_format($funding['remaining'], 2)
+            . ' is still uncovered. You can wait for your other sponsors or accept the funding you have.' . $note,
+        'student-budget.php');
+    $doneMessage = 'You committed ' . $mine . '. ' . $studentName . '\'s budget is ' . $funding['percent'] . '% funded so far.';
 }
 
-// Start this sponsor's M-Pesa top-up, if one was requested
-if ($fundAmount > 0) {
+// Pay the share now through M-Pesa, if asked
+if ($payNow) {
     try {
         $paymentId = mpesa_start_funding(
-            $conn, $sponsorId, $walletId, $fundAmount, $phone,
-            'Top-up for budget #' . $proposalId, $proposalId
+            $conn, $sponsorId, $walletId, (int) ceil($myAmount), $phone,
+            'Share of budget #' . $proposalId, $proposalId
         );
     } catch (Throwable $e) {
-        back('error', $doneMessage . ' But the M-Pesa top-up could not start: '
+        back('error', $doneMessage . ' But the M-Pesa payment could not start: '
             . $e->getMessage() . ' You can send the money from the dashboard instead.');
     }
     header('Location: ../Frontend/mpesa-wait.php?id=' . $paymentId);
