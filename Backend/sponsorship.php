@@ -56,6 +56,48 @@ function funder_label(array $row): string
     return $row['full_name'] . ($rel && isset(RELATIONSHIPS[$rel]) ? ' (' . RELATIONSHIPS[$rel] . ')' : '');
 }
 
+/** "Amina Wanjiru" -> "Amina W." : how a listed student is shown to well-wishers who don't fund them yet. */
+function public_student_name(string $fullName): string
+{
+    $parts = preg_split('/\s+/', trim($fullName));
+    $first = $parts[0] ?? '';
+    return count($parts) > 1 ? $first . ' ' . mb_strtoupper(mb_substr(end($parts), 0, 1)) . '.' : $first;
+}
+
+/** The student's public profile (institution, course, year, story, listed) or null if the columns are missing. */
+function student_profile(mysqli $conn, int $studentId): ?array
+{
+    try {
+        $stmt = $conn->prepare("SELECT id, full_name, institution, course, year_of_study, story, listed
+                                FROM users WHERE id = ? AND role = 'student'");
+        $stmt->bind_param('i', $studentId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    } catch (Throwable $e) {
+        return null;   // Step 29 SQL not run yet
+    }
+}
+
+/** True if the student chose to be shown to well-wishers. */
+function is_listed(mysqli $conn, int $studentId): bool
+{
+    $p = student_profile($conn, $studentId);
+    return $p && (int) $p['listed'] === 1;
+}
+
+/** True if this sponsor account is a well-wisher (sponsor_type 'individual'). */
+function is_well_wisher(mysqli $conn, int $userId): bool
+{
+    $stmt = $conn->prepare("SELECT sponsor_type FROM users WHERE id = ? AND role = 'sponsor'");
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row && ($row['sponsor_type'] ?? 'individual') === 'individual';
+}
+
 /** True if this sponsor is anonymous to this student. */
 function is_anonymous_to(mysqli $conn, int $sponsorId, int $studentId): bool
 {

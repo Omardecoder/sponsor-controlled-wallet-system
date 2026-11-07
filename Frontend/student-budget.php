@@ -24,8 +24,9 @@ $wallet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 $sponsors = student_sponsors($conn, $studentId);
-if (!$sponsors) {
-    $wallet = null;   // no accepted sponsor yet: nothing to plan for
+$listed   = is_listed($conn, $studentId);   // shown to well-wishers on the Students page
+if (!$sponsors && !$listed) {
+    $wallet = null;   // no accepted sponsor and not listed: nobody could fund a budget yet
 }
 $funding = null;   // funding status of a budget that is waiting
 
@@ -145,7 +146,8 @@ $active = 'budget';
       <?php if (!$wallet): ?>
         <section class="card">
           <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
-          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, then accept their request on your dashboard.</p>
+          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, then accept their request on your dashboard.
+            Or <a href="student-profile.php">list yourself for well-wishers</a>: you can then plan a budget straight away and well-wishers can choose to fund it.</p>
         </section>
 
       <?php else: ?>
@@ -241,7 +243,7 @@ $active = 'budget';
           <div class="card stat">
             <div class="stat-label">Sponsors</div>
             <div class="stat-value"><?= count($sponsors) ?></div>
-            <div class="stat-note">Each chooses how much of your budget to fund</div>
+            <div class="stat-note"><?= $sponsors ? 'Each chooses how much of your budget to fund' : 'Listed for well-wishers: they can fund your budget' ?></div>
           </div>
           <div class="card stat">
             <div class="stat-label">Wallet balance</div>
@@ -338,8 +340,8 @@ $active = 'budget';
 
             <?php if (!$locked): ?>
               <button type="submit" class="btn btn-lg" id="save"
-                      onclick="return confirm('Send this budget to your sponsor<?= count($sponsors) > 1 ? 's' : '' ?> for approval?');">
-                <?= sw_icon('send') ?>Submit to sponsor<?= count($sponsors) > 1 ? 's' : '' ?>
+                      onclick="return confirm('<?= $sponsors ? 'Send this budget to your sponsor' . (count($sponsors) > 1 ? 's' : '') . '?' : 'Publish this budget to well-wishers?' ?>');">
+                <?= sw_icon('send') ?><?= $sponsors ? 'Submit to sponsor' . (count($sponsors) > 1 ? 's' : '') : 'Publish to well-wishers' ?>
               </button>
             <?php endif; ?>
           </form>

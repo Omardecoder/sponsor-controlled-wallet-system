@@ -12,6 +12,11 @@
 // decision = changes -> the proposal goes back to the student ("changes_requested") with feedback.
 //                       One funder asking for changes is enough.
 // If the budget stays below 100%, the student decides what to do (see budget_action.php).
+//
+// from_browse = 1    -> a WELL-WISHER funds a LISTED student from the Students page (sponsor-student.php).
+//                       If they are not linked yet, an active sponsorship is created in the same
+//                       transaction (listing = the student's consent), anonymous if they chose so.
+//                       If anything fails, nothing is saved (no sponsorship without a commitment).
 
 session_start();
 require_once __DIR__ . '/db.php';
@@ -26,10 +31,17 @@ if (MPESA_READY) {
     require_once __DIR__ . '/mpesa_funding.php';
 }
 
+$fromBrowse      = ($_POST['from_browse'] ?? '') === '1';
+$browseStudentId = (int) ($_POST['student_id'] ?? 0);
+$backUrl = $fromBrowse && $browseStudentId > 0
+    ? '../Frontend/sponsor-student.php?id=' . $browseStudentId
+    : '../Frontend/sponsor-proposals.php';
+
 function back(string $type, string $message): void
 {
+    global $backUrl;
     $_SESSION['flash'] = ['type' => $type, 'message' => $message];
-    header('Location: ../Frontend/sponsor-proposals.php');
+    header('Location: ' . $backUrl);
     exit;
 }
 
@@ -50,6 +62,10 @@ $phoneIn     = $_POST['phone'] ?? '';
 if (!in_array($decision, ['commit', 'changes'], true)) {
     back('error', 'Choose Fund this budget or Request changes.');
 }
+if ($fromBrowse && $decision !== 'commit') {
+    back('error', 'From the Students page you can only fund a budget.');
+}
+$browseAnonymous = !empty($_POST['anonymous']) ? 1 : 0;
 if ($decision === 'changes' && $feedback === '') {
     back('error', 'Tell the student what to change before sending it back.');
 }
@@ -81,8 +97,60 @@ if ($decision === 'commit' && $payNow) {
 
 $complete = false;
 $myAmount = 0.0;
+$newLink  = false;   // true when this commitment also created the sponsorship (Students page)
 try {
     $conn->begin_transaction();
+
+    // ---- Students page: link the well-wisher to the listed student first (same transaction) ----
+    if ($fromBrowse) {
+        if (!is_well_wisher($conn, $sponsorId)) {
+            $conn->rollback();
+            back('error', 'Only well-wishers can fund students from the Students page.');
+        }
+        $stmt = $conn->prepare(
+            "SELECT w.student_id, u.listed
+             FROM budget_proposals p JOIN wallets w ON w.id = p.wallet_id JOIN users u ON u.id = w.student_id
+             WHERE p.id = ? FOR UPDATE"
+        );
+        $stmt->bind_param('i', $proposalId);
+        $stmt->execute();
+        $target = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if (!$target || (int) $target['student_id'] !== $browseStudentId) {
+            $conn->rollback();
+            back('error', 'That budget was not found.');
+        }
+        $stmt = $conn->prepare('SELECT id, status FROM sponsorships WHERE student_id = ? AND sponsor_id = ? FOR UPDATE');
+        $stmt->bind_param('ii', $browseStudentId, $sponsorId);
+        $stmt->execute();
+        $link = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$link || $link['status'] !== 'active') {
+            if ((int) $target['listed'] !== 1) {
+                $conn->rollback();
+                back('error', 'This student is no longer listed for well-wishers.');
+            }
+            if ($link && $link['status'] === 'declined') {
+                $conn->rollback();
+                back('error', 'This student declined an earlier request from you, so you can\'t fund them.');
+            }
+            if ($link) {   // pending or ended: make it active
+                $stmt = $conn->prepare("UPDATE sponsorships SET status = 'active', is_anonymous = ?, responded_at = NOW() WHERE id = ?");
+                $linkId = (int) $link['id'];
+                $stmt->bind_param('ii', $browseAnonymous, $linkId);
+            } else {
+                $stmt = $conn->prepare(
+                    "INSERT INTO sponsorships (student_id, sponsor_id, pledge, status, is_anonymous, responded_at)
+                     VALUES (?, ?, 0, 'active', ?, NOW())"
+                );
+                $stmt->bind_param('iii', $browseStudentId, $sponsorId, $browseAnonymous);
+            }
+            $stmt->execute();
+            $stmt->close();
+            $newLink = true;
+        }
+    }
 
     // The proposal must belong to a student this sponsor ACTIVELY sponsors. Lock it, so two funders
     // committing at the same moment are handled one after the other (no going over 100%).
@@ -191,6 +259,14 @@ try {
 
 // ---- Alerts ----
 $studentName = $proposal['student_name'];
+if ($newLink) {
+    $shownNew = sponsor_name_for_student($conn, $sponsorId, $studentId, $sponsorName);
+    notify($conn, $studentId, 'sponsorship_from_browse', $shownNew . ' chose to support you',
+        'They found you on the Students page and are now one of your sponsors.', 'student-dashboard.php');
+    notify_sponsors($conn, $studentId, 'co_sponsor_joined', $shownNew . ' is now also sponsoring ' . $studentName,
+        'They chose ' . $studentName . ' from the Students page and committed to the current budget.',
+        'sponsor-proposals.php', null, $sponsorId);
+}
 $note        = $feedback !== '' ? ' Note: "' . $feedback . '"' : '';
 // What the student and the other funders may see: anonymous well-wishers are never named
 $sponsorName = sponsor_name_for_student($conn, $sponsorId, $studentId, $sponsorName);

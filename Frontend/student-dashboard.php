@@ -202,7 +202,8 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
       <?php if (!$wallet || !$sponsors): ?>
         <section class="card">
           <div class="card-head"><h3>You're not linked to a sponsor yet</h3></div>
-          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, or <a href="student-programs.php">apply to a sponsorship program</a> from an organization. Once you have a sponsor, your wallet and budget tools appear here.</p>
+          <p class="muted">Ask a sponsor to add you from their dashboard using the email or phone number you registered with, <a href="student-programs.php">apply to a sponsorship program</a> from an organization,
+            or <a href="student-profile.php">list yourself for well-wishers</a> and <a href="student-budget.php">publish a budget</a> they can fund. Once you have a sponsor, your wallet and budget tools appear here.</p>
         </section>
 
       <?php else: ?>

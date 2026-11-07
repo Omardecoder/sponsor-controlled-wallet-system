@@ -79,8 +79,10 @@ if ($myWallet) {
 }
 
 // Someone has to be able to fund it
-if (!student_sponsors($conn, $studentId)) {
-    back('error', 'You have no active sponsor yet. Accept a sponsor\'s request, or apply to a program, first.');
+// (or the student is listed, so well-wishers can find the budget on the Students page)
+$listed = is_listed($conn, $studentId);
+if (!student_sponsors($conn, $studentId) && !$listed) {
+    back('error', 'You have no active sponsor yet. Accept a sponsor\'s request, apply to a program, or list yourself for well-wishers on My Profile first.');
 }
 
 try {
@@ -149,4 +151,8 @@ notify_sponsors(
         . ($sponsorCount > 1 ? ' (your ' . $sponsorCount . ' funders share it).' : '.'),
     'sponsor-proposals.php'
 );
-back('success', 'Your budget was sent to your sponsor' . ($sponsorCount > 1 ? 's' : '') . '. It becomes active when it is 100% funded.');
+if ($sponsorCount === 0) {
+    back('success', 'Your budget is published to well-wishers. It becomes active when it is 100% funded.');
+}
+back('success', 'Your budget was sent to your sponsor' . ($sponsorCount > 1 ? 's' : '') . ($listed ? ' and published to well-wishers' : '')
+    . '. It becomes active when it is 100% funded.');

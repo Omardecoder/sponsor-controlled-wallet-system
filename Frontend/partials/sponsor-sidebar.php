@@ -4,7 +4,7 @@
 //
 // Before including it, a page sets which link is highlighted:
 //     $active = 'dashboard';   // or 'alerts', 'students', 'send', 'proposals', 'funding', 'spending', 'reports',
-//                              //    'programs', 'applications' (organizations only)
+//                              //    'programs', 'applications' (organizations only), 'browse' (well-wishers only)
 //
 // It also sets $pendingCount (proposals waiting for this sponsor's decision), $alertCount (unread alerts)
 // and loads sw_icon() from icons.php, so the page can use them after the include.
@@ -62,6 +62,9 @@ $sidebarLinks = [
     ['dashboard', 'Dashboard',        'sponsor-dashboard.php',              'dashboard'],
     ['alerts',    'Alerts',           'alerts.php',                         'bell'],
     ['students',  'My Students',      'sponsor-dashboard.php#students',     'students'],
+    ...($sidebarType === 'individual' ? [
+        ['browse', 'Find Students', 'sponsor-browse.php', 'search'],
+    ] : []),
     ...($sidebarIsOrg ? [
         ['programs',     'Programs',     'org-programs.php',     'award'],
         ['applications', 'Applications', 'org-applications.php', 'inbox'],

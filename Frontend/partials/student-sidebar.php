@@ -3,7 +3,7 @@
 // The student sidebar, shared by every student page.
 //
 // Before including it, a page sets which link is highlighted:
-//     $active = 'dashboard';   // or 'alerts', 'budget', 'record', 'spending', 'funding', 'programs'
+//     $active = 'dashboard';   // or 'alerts', 'budget', 'record', 'spending', 'funding', 'programs', 'profile'
 // It also sets $alertCount (unread alerts) for the page to use.
 
 require_once __DIR__ . '/icons.php';
@@ -21,6 +21,7 @@ $sidebarLinks = [
     ['spending',  'Spending History', 'record-spending.php?view=history#history',     'receipt'],
     ['funding',   'Funding History',  'student-dashboard.php?tx=funding#transactions',  'history'],
     ['programs',  'Find Sponsorship', 'student-programs.php',                         'award'],
+    ['profile',   'My Profile',       'student-profile.php',                          'profile'],
 ];
 ?>
 <aside class="sidebar">
