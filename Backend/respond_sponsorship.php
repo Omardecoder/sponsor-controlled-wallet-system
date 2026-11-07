@@ -34,7 +34,7 @@ try {
 
     // The request must be addressed to this student and still unanswered
     $stmt = $conn->prepare(
-        "SELECT sp.id, sp.sponsor_id, sp.pledge, u.full_name AS sponsor_name
+        "SELECT sp.id, sp.sponsor_id, sp.pledge, sp.relationship, sp.is_anonymous, u.full_name AS sponsor_name
          FROM sponsorships sp JOIN users u ON u.id = sp.sponsor_id
          WHERE sp.id = ? AND sp.student_id = ? AND sp.status = 'pending'
          FOR UPDATE"
@@ -49,6 +49,9 @@ try {
         back('error', 'That request was not found or has already been answered.');
     }
     $sponsorId = (int) $request['sponsor_id'];
+    // The name the student and the other sponsors may see ("Anonymous well-wisher" when anonymous)
+    $shownName = funder_label(['full_name' => $request['sponsor_name'], 'relationship' => $request['relationship'],
+                               'is_anonymous' => $request['is_anonymous']]);
 
     if ($decision === 'accept') {
         // The student's one wallet: create it with the first sponsor who is accepted
@@ -84,7 +87,7 @@ try {
 // ---- Alerts ----
 if ($decision === 'decline') {
     notify($conn, $sponsorId, 'sponsorship_declined', $studentName . ' declined your sponsorship request', '', 'sponsor-dashboard.php#students');
-    back('success', 'You declined the request from ' . $request['sponsor_name'] . '.');
+    back('success', 'You declined the request from ' . $shownName . '.');
 }
 
 notify(
@@ -95,9 +98,9 @@ notify(
 );
 notify_sponsors(
     $conn, $studentId, 'co_sponsor_joined',
-    $request['sponsor_name'] . ' is now also sponsoring ' . $studentName,
+    $shownName . ' is now also sponsoring ' . $studentName,
     'They can now fund a share of ' . $studentName . '\'s budgets alongside you.',
     'sponsor-dashboard.php#students', null, $sponsorId
 );
 
-back('success', $request['sponsor_name'] . ' is now one of your sponsors. They can fund a share of each budget you send.');
+back('success', $shownName . ' is now one of your sponsors. They can fund a share of each budget you send.');

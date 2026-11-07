@@ -19,6 +19,79 @@
 
 require_once __DIR__ . '/notify.php';
 
+// Sponsor modes (users.sponsor_type). 'individual' is shown as "Well-wisher".
+const SPONSOR_TYPE_LABELS = [
+    'family'       => 'Family / guardian',
+    'individual'   => 'Well-wisher',
+    'organization' => 'Organization',
+];
+
+// How a family sponsor is related to the student (sponsorships.relationship)
+const RELATIONSHIPS = [
+    'mother'   => 'Mother',
+    'father'   => 'Father',
+    'guardian' => 'Guardian',
+    'sibling'  => 'Brother / sister',
+    'relative' => 'Other relative',
+];
+
+const ANONYMOUS_LABEL = 'Anonymous well-wisher';
+
+function sponsor_type_label(?string $type): string
+{
+    return SPONSOR_TYPE_LABELS[$type ?? 'individual'] ?? 'Sponsor';
+}
+
+/**
+ * The name a STUDENT (or another funder) may see for a sponsor.
+ * Anonymous well-wishers are never named; family sponsors show their relationship, e.g. "Jane Doe (Mother)".
+ * $row needs full_name, and may have is_anonymous and relationship.
+ */
+function funder_label(array $row): string
+{
+    if (!empty($row['is_anonymous'])) {
+        return ANONYMOUS_LABEL;
+    }
+    $rel = $row['relationship'] ?? null;
+    return $row['full_name'] . ($rel && isset(RELATIONSHIPS[$rel]) ? ' (' . RELATIONSHIPS[$rel] . ')' : '');
+}
+
+/** True if this sponsor is anonymous to this student. */
+function is_anonymous_to(mysqli $conn, int $sponsorId, int $studentId): bool
+{
+    try {
+        $stmt = $conn->prepare('SELECT is_anonymous FROM sponsorships WHERE sponsor_id = ? AND student_id = ?');
+        $stmt->bind_param('ii', $sponsorId, $studentId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row && (int) $row['is_anonymous'] === 1;
+    } catch (Throwable $e) {
+        return false;   // column not added yet (Step 28 SQL not run)
+    }
+}
+
+/** The sponsor's name as the student may see it ("Anonymous well-wisher" when anonymous). */
+function sponsor_name_for_student(mysqli $conn, int $sponsorId, int $studentId, string $realName): string
+{
+    return is_anonymous_to($conn, $sponsorId, $studentId) ? ANONYMOUS_LABEL : $realName;
+}
+
+/**
+ * Hide an anonymous sponsor's identity in a row before it is shown:
+ * full_name becomes the safe label, email and phone are removed. The real name is kept in real_name.
+ */
+function mask_funder(array $row): array
+{
+    $row['real_name'] = $row['full_name'];
+    $row['full_name'] = funder_label($row);
+    if (!empty($row['is_anonymous'])) {
+        $row['email'] = '';
+        $row['phone'] = '';
+    }
+    return $row;
+}
+
 /**
  * The student's sponsors, with how much each has sent in total.
  * $activeOnly = false also returns pending/declined/ended ones (for history screens).
@@ -26,6 +99,7 @@ require_once __DIR__ . '/notify.php';
 function student_sponsors(mysqli $conn, int $studentId, bool $activeOnly = true): array
 {
     $sql = "SELECT sp.id, sp.sponsor_id, sp.pledge, sp.status, sp.message, sp.created_at,
+                   sp.relationship, sp.is_anonymous, u.sponsor_type,
                    u.full_name, u.email, u.phone,
                    (SELECT COALESCE(SUM(t.amount), 0)
                       FROM transactions t JOIN wallets w ON w.id = t.wallet_id
@@ -39,7 +113,7 @@ function student_sponsors(mysqli $conn, int $studentId, bool $activeOnly = true)
     $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
-    return $rows;
+    return array_map('mask_funder', $rows);   // anonymous sponsors are never named
 }
 
 /**
@@ -98,7 +172,7 @@ function proposal_total(mysqli $conn, int $proposalId): float
 function proposal_funding(mysqli $conn, int $proposalId, int $studentId): array
 {
     $stmt = $conn->prepare(
-        "SELECT sp.sponsor_id, sp.pledge, u.full_name, r.decision, r.commit_amount, r.feedback, r.created_at AS decided_at
+        "SELECT sp.sponsor_id, sp.pledge, sp.relationship, sp.is_anonymous, u.sponsor_type, u.full_name, r.decision, r.commit_amount, r.feedback, r.created_at AS decided_at
          FROM sponsorships sp
          JOIN users u ON u.id = sp.sponsor_id
          LEFT JOIN proposal_reviews r ON r.proposal_id = ? AND r.sponsor_id = sp.sponsor_id
@@ -107,7 +181,7 @@ function proposal_funding(mysqli $conn, int $proposalId, int $studentId): array
     );
     $stmt->bind_param('ii', $proposalId, $studentId);
     $stmt->execute();
-    $sponsors = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $sponsors = array_map('mask_funder', $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
     $stmt->close();
 
     $total     = proposal_total($conn, $proposalId);

@@ -192,6 +192,8 @@ try {
 // ---- Alerts ----
 $studentName = $proposal['student_name'];
 $note        = $feedback !== '' ? ' Note: "' . $feedback . '"' : '';
+// What the student and the other funders may see: anonymous well-wishers are never named
+$sponsorName = sponsor_name_for_student($conn, $sponsorId, $studentId, $sponsorName);
 
 if ($decision === 'changes') {
     notify($conn, $studentId, 'budget_changes', 'Changes requested on your budget',

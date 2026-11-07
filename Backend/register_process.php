@@ -1,13 +1,16 @@
 <?php
 // backend/register_process.php
 // Receives the registration form, validates it, and saves a new user.
-// Public registration can only create "student" or "sponsor" accounts.
-// An "organization" is saved as a sponsor with sponsor_type = 'organization' (verified later by the admin).
+// Public registration can only create student or sponsor accounts (family, well-wisher or organization).
+// An organization is verified later by the admin.
 
 session_start();
 require_once __DIR__ . '/db.php';
 
-const ALLOWED_ROLES = ['student', 'sponsor', 'organization'];   // admin is never allowed here
+// admin is never allowed here. family / wellwisher / organization are all saved as role = 'sponsor'
+// with sponsor_type = 'family' / 'individual' / 'organization'.
+const ALLOWED_ROLES = ['student', 'family', 'wellwisher', 'organization'];
+const SPONSOR_TYPES = ['family' => 'family', 'wellwisher' => 'individual', 'organization' => 'organization'];
 
 function back_with_errors(array $errors, array $old): void
 {
@@ -30,6 +33,9 @@ $phone     = preg_replace('/[\s\-]/', '', $phone_raw);   // store without spaces
 $password  = $_POST['password'] ?? '';
 $confirm   = $_POST['confirm_password'] ?? '';
 $role      = $_POST['role'] ?? '';
+if ($role === 'sponsor') {
+    $role = 'wellwisher';   // old form value
+}
 
 $old = ['full_name' => $full_name, 'email' => $email, 'phone' => $phone_raw, 'role' => $role,
         'password' => '', 'confirm_password' => ''];
@@ -52,7 +58,7 @@ if ($password !== $confirm) {
     $errors[] = 'The two passwords do not match.';
 }
 if (!in_array($role, ALLOWED_ROLES, true)) {
-    $errors[] = 'Choose Student, Sponsor or Organization.';
+    $errors[] = 'Choose Student, Family / guardian, Well-wisher or Organization.';
 }
 
 // ---- Duplicate check (only if the basics are fine) ----
@@ -78,7 +84,7 @@ $hash = password_hash($password, PASSWORD_DEFAULT);
 
 // Sponsors and organizations both use the sponsor role; sponsor_type tells them apart
 $dbRole      = $role === 'student' ? 'student' : 'sponsor';
-$sponsorType = $role === 'student' ? null : ($role === 'organization' ? 'organization' : 'individual');
+$sponsorType = SPONSOR_TYPES[$role] ?? null;
 
 try {
     $stmt = $conn->prepare('INSERT INTO users (full_name, email, phone, password, role, sponsor_type) VALUES (?, ?, ?, ?, ?, ?)');
