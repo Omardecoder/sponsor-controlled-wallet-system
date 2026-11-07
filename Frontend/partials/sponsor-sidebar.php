@@ -34,12 +34,14 @@ require_once __DIR__ . '/icons.php';   // sw_icon()
 
 // Organizations (sponsor_type = 'organization') also get Programs and Applications
 $sidebarIsOrg = false;
+$sidebarType = 'individual';
 $newApplications = 0;
 try {
     $stmt = $conn->prepare("SELECT sponsor_type FROM users WHERE id = ?");
     $stmt->bind_param('i', $sidebarSponsorId);
     $stmt->execute();
-    $sidebarIsOrg = ($stmt->get_result()->fetch_assoc()['sponsor_type'] ?? '') === 'organization';
+    $sidebarType  = $stmt->get_result()->fetch_assoc()['sponsor_type'] ?? 'individual';
+    $sidebarIsOrg = $sidebarType === 'organization';
     $stmt->close();
     if ($sidebarIsOrg) {
         $stmt = $conn->prepare(
@@ -76,7 +78,7 @@ $sidebarLinks = [
     <div class="brand-mark"><?= sw_icon('wallet') ?></div>
     <div>
       <div class="brand-name">SS-Wallet</div>
-      <div class="brand-role"><?= $sidebarIsOrg ? 'Organization' : 'Sponsor' ?></div>
+      <div class="brand-role"><?= htmlspecialchars(['family' => 'Family / guardian', 'individual' => 'Well-wisher', 'organization' => 'Organization'][$sidebarType] ?? 'Sponsor') ?></div>
     </div>
   </div>
 

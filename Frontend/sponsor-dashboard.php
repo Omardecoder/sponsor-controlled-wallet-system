@@ -12,17 +12,27 @@ require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
 
+// This sponsor's mode: family, individual (well-wisher) or organization
+$stmt = $conn->prepare('SELECT sponsor_type FROM users WHERE id = ?');
+$stmt->bind_param('i', $sponsorId);
+$stmt->execute();
+$myType = $stmt->get_result()->fetch_assoc()['sponsor_type'] ?? 'individual';
+$stmt->close();
+$isFamily     = $myType === 'family';
+$isWellWisher = $myType === 'individual';
+
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
 // ---- My students: active sponsorships and requests still waiting for the student ----
 $stmt = $conn->prepare(
     "SELECT sp.id AS sponsorship_id, sp.status AS link_status, sp.pledge, sp.created_at AS asked_at,
+            sp.relationship, sp.is_anonymous,
             u.id AS student_id, u.full_name, u.email, u.phone,
             w.id, w.balance, w.status,
             (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
               WHERE t.wallet_id = w.id AND t.type = 'funding' AND t.created_by = sp.sponsor_id) AS my_funded,
-            (SELECT GROUP_CONCAT(ou.full_name ORDER BY o.created_at SEPARATOR ', ')
+            (SELECT GROUP_CONCAT(CASE WHEN o.is_anonymous = 1 THEN 'an anonymous well-wisher' ELSE ou.full_name END ORDER BY o.created_at SEPARATOR ', ')
                FROM sponsorships o JOIN users ou ON ou.id = o.sponsor_id
               WHERE o.student_id = sp.student_id AND o.status = 'active' AND o.sponsor_id <> sp.sponsor_id) AS co_sponsors
      FROM sponsorships sp
@@ -91,7 +101,10 @@ $budgetRows = array_values(array_filter($merged, fn($b) => $b['allocated'] > 0 |
 
 // ---- Recent transactions on my students' wallets (from any of their sponsors) ----
 $stmt = $conn->prepare(
-    "SELECT t.type, t.amount, t.description, t.created_at, t.created_by, u.full_name, c.full_name AS by_name
+    "SELECT t.type, t.amount, t.description, t.created_at, t.created_by, u.full_name,
+            CASE WHEN EXISTS (SELECT 1 FROM sponsorships sa WHERE sa.sponsor_id = t.created_by
+                               AND sa.student_id = w.student_id AND sa.is_anonymous = 1)
+                 THEN 'an anonymous well-wisher' ELSE c.full_name END AS by_name
      FROM transactions t
      JOIN wallets w ON w.id = t.wallet_id
      JOIN sponsorships sp ON sp.student_id = w.student_id AND sp.status = 'active'
@@ -151,7 +164,7 @@ $active = 'dashboard';
           <div class="avatar" aria-hidden="true"><?= htmlspecialchars($initials) ?></div>
           <div class="profile-text">
             <div class="profile-name"><?= htmlspecialchars($_SESSION['full_name']) ?></div>
-            <div class="profile-role">Sponsor</div>
+            <div class="profile-role"><?= htmlspecialchars(sponsor_type_label($myType)) ?></div>
           </div>
         </div>
       </div>
@@ -319,7 +332,7 @@ $active = 'dashboard';
       <section class="card" id="students">
         <div class="card-head"><h3>My students</h3></div>
 
-        <form action="../Backend/sponsorship_action.php" method="post" class="sponsor-request">
+        <form action="../Backend/sponsorship_action.php" method="post" class="sponsor-request<?= ($isFamily || $isWellWisher) ? ' has-extra' : '' ?>">
           <input type="hidden" name="action" value="request">
           <div>
             <label for="student_identifier">Student's email or phone</label>
@@ -329,6 +342,22 @@ $active = 'dashboard';
             <label for="message">Message (optional)</label>
             <input type="text" id="message" name="message" maxlength="255" placeholder="e.g. Your upkeep for this semester">
           </div>
+          <?php if ($isFamily): ?>
+            <div>
+              <label for="relationship">You are their</label>
+              <select id="relationship" name="relationship" required>
+                <option value="">Choose…</option>
+                <?php foreach (RELATIONSHIPS as $code => $label): ?>
+                  <option value="<?= $code ?>"><?= htmlspecialchars($label) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+          <?php elseif ($isWellWisher): ?>
+            <label class="check anon-check">
+              <input type="checkbox" name="anonymous" value="1">
+              <span>Stay anonymous<br><span class="muted small">The student sees "Anonymous well-wisher"</span></span>
+            </label>
+          <?php endif; ?>
           <button type="submit" class="btn">Send request</button>
         </form>
         <p class="muted small" style="margin-top:6px;">The student must accept before you are linked. After that, each budget they send shows up under Budget Proposals, where you choose how much of it to fund.</p>
@@ -346,8 +375,18 @@ $active = 'dashboard';
                   <tr>
                     <td>
                       <strong><?= htmlspecialchars($s['full_name']) ?></strong>
+                      <?php if ($s['relationship'] && isset(RELATIONSHIPS[$s['relationship']])): ?><span class="pill grey">You are their <?= htmlspecialchars(strtolower(RELATIONSHIPS[$s['relationship']])) ?></span><?php endif; ?>
+                      <?php if ((int) $s['is_anonymous'] === 1): ?><span class="pill grey">Anonymous to student</span><?php endif; ?>
                       <div class="muted small"><?= htmlspecialchars($s['email']) ?> · <?= htmlspecialchars($s['phone']) ?></div>
                       <?php if ($s['co_sponsors']): ?><div class="muted small">Also sponsored by <?= htmlspecialchars($s['co_sponsors']) ?></div><?php endif; ?>
+                      <?php if ($isWellWisher): ?>
+                        <form action="../Backend/sponsorship_action.php" method="post" class="anon-toggle">
+                          <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
+                          <input type="hidden" name="action" value="anonymity">
+                          <input type="hidden" name="anonymous" value="<?= (int) $s['is_anonymous'] === 1 ? 0 : 1 ?>">
+                          <button type="submit" class="link-btn"><?= (int) $s['is_anonymous'] === 1 ? 'Show my name to this student' : 'Hide my name from this student' ?></button>
+                        </form>
+                      <?php endif; ?>
                     </td>
                     <td>
                       <?php if (!$isActive): ?>

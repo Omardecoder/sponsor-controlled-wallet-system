@@ -361,9 +361,6 @@ input[type=tel]:disabled, input[type=number]:disabled { background: var(--paper)
   .bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   a { color: inherit; text-decoration: none; }
 }
-
-
-
 /* ---------- Several sponsors per student ---------- */
 .sponsor-request { display: grid; grid-template-columns: 1.4fr 1fr 1.4fr auto; gap: 12px; align-items: end; }
 .inline-action { display: inline-flex; align-items: center; gap: 6px; }
@@ -374,12 +371,9 @@ input[type=tel]:disabled, input[type=number]:disabled { background: var(--paper)
 @media (max-width: 820px) { .sponsor-request { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 480px) { .sponsor-request { grid-template-columns: 1fr; } .pledge-input { width: 100px; } }
 
-
-
 /* ---------- Approval by every sponsor ---------- */
 .approval-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 14px; }
 .money-box { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-
 
 /* ---------- Organizations, programs and applications ---------- */
 label.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 500; margin: 0; }
@@ -398,11 +392,27 @@ label.check input { margin-top: 3px; width: 18px; height: 18px; flex: none; acce
 .doc-list a { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 @media (max-width: 480px) { .program-amount { text-align: left; } }
 
-
-
 /* ---------- Student-chosen categories ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--paper); color: var(--forest); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; }
 .chip:hover { border-color: var(--forest); background: #e4efe9; }
 .chip:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
 .chip .icon { width: 15px; height: 15px; }
+
+/* ---------- Funding shares (funders commit a % or an amount of each budget) ---------- */
+.sponsor-request { grid-template-columns: 1.4fr 1.6fr auto; }
+.funding { margin: -4px 0 16px; padding: 12px 14px; background: var(--paper); border-radius: 10px; }
+.funders { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.commit-type { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.commit-type legend { font-weight: 600; font-size: .88rem; margin-bottom: 6px; padding: 0; }
+.funding-card { border-left: 4px solid var(--saffron); }
+@media (max-width: 820px) { .sponsor-request { grid-template-columns: 1fr; } }
+
+/* ---------- Sponsor modes: family relationship and anonymous well-wishers ---------- */
+.sponsor-request.has-extra { grid-template-columns: 1.3fr 1.3fr 1fr auto; }
+.anon-check { align-self: end; padding-bottom: 6px; }
+.pill.grey + .pill.grey { margin-left: 4px; }
+.funder-anon { font-style: italic; }
+@media (max-width: 820px) { .sponsor-request.has-extra { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .sponsor-request.has-extra { grid-template-columns: 1fr; } }
+.anon-toggle { margin-top: 4px; }

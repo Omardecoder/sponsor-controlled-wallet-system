@@ -53,8 +53,8 @@ if ($roleFilter) {
     $params[] = $roleFilter;
 }
 // A student can have several sponsors and a sponsor several students (sponsorships table)
-$sql = "SELECT u.id, u.full_name, u.email, u.phone, u.role, u.created_at,
-               (SELECT GROUP_CONCAT(s.full_name ORDER BY x.created_at SEPARATOR ', ')
+$sql = "SELECT u.id, u.full_name, u.email, u.phone, u.role, u.sponsor_type, u.created_at,
+               (SELECT GROUP_CONCAT(CONCAT(s.full_name, IF(x.is_anonymous = 1, ' (anonymous)', '')) ORDER BY x.created_at SEPARATOR ', ')
                   FROM sponsorships x JOIN users s ON s.id = x.sponsor_id
                  WHERE x.student_id = u.id AND x.status = 'active') AS sponsor_name,
                (SELECT COUNT(*) FROM sponsorships x WHERE x.sponsor_id = u.id AND x.status = 'active') AS student_count
@@ -74,7 +74,7 @@ $stmt->close();
 $wallets = $conn->query(
     "SELECT w.id, w.balance, w.status, w.created_at,
             st.full_name AS student_name,
-            (SELECT GROUP_CONCAT(s.full_name ORDER BY x.created_at SEPARATOR ', ')
+            (SELECT GROUP_CONCAT(CONCAT(s.full_name, IF(x.is_anonymous = 1, ' (anonymous)', '')) ORDER BY x.created_at SEPARATOR ', ')
                FROM sponsorships x JOIN users s ON s.id = x.sponsor_id
               WHERE x.student_id = w.student_id AND x.status = 'active') AS sponsor_name,
             (SELECT COALESCE(SUM(amount), 0) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 'spending') AS spent
@@ -231,7 +231,7 @@ $active = 'overview';
                   <tr>
                     <td><strong><?= htmlspecialchars($u['full_name']) ?></strong></td>
                     <td class="muted"><?= htmlspecialchars($u['email']) ?><br><?= htmlspecialchars($u['phone']) ?></td>
-                    <td><span class="pill <?= ['student' => 'green', 'sponsor' => 'amber', 'admin' => 'grey'][$u['role']] ?? 'grey' ?>"><?= ucfirst(htmlspecialchars($u['role'])) ?></span></td>
+                    <td><span class="pill <?= ['student' => 'green', 'sponsor' => 'amber', 'admin' => 'grey'][$u['role']] ?? 'grey' ?>"><?= $u['role'] === 'sponsor' ? htmlspecialchars(['family' => 'Family', 'individual' => 'Well-wisher', 'organization' => 'Organization'][$u['sponsor_type'] ?? 'individual'] ?? 'Sponsor') : ucfirst(htmlspecialchars($u['role'])) ?></span></td>
                     <td>
                       <?php if ($u['role'] === 'student'): ?>
                         <?= $u['sponsor_name'] ? 'Sponsored by ' . htmlspecialchars($u['sponsor_name']) : '<span class="muted">Not linked yet</span>' ?>

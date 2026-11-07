@@ -66,7 +66,10 @@ if ($wallet) {
 
     // Latest budget proposal, who asked for changes, and who has approved so far
     $stmt = $conn->prepare(
-        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at, r.full_name AS reviewer_name,
+        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at,
+                CASE WHEN EXISTS (SELECT 1 FROM sponsorships sa JOIN wallets wa ON wa.student_id = sa.student_id
+                                 WHERE wa.id = p.wallet_id AND sa.sponsor_id = p.reviewed_by AND sa.is_anonymous = 1)
+                     THEN \'An anonymous well-wisher\' ELSE r.full_name END AS reviewer_name,
                 (SELECT COALESCE(SUM(i.proposed_amount), 0) FROM budget_proposal_items i WHERE i.proposal_id = p.id) AS total
          FROM budget_proposals p
          LEFT JOIN users r ON r.id = p.reviewed_by
@@ -83,9 +86,12 @@ if ($wallet) {
     }
 
     // Recent transactions
-    $sql = 'SELECT t.type, t.amount, t.balance_after, t.description, t.created_at, u.full_name AS by_name
-            FROM transactions t JOIN users u ON u.id = t.created_by
-            WHERE t.wallet_id = ?'
+    $sql = "SELECT t.type, t.amount, t.balance_after, t.description, t.created_at,
+                   CASE WHEN EXISTS (SELECT 1 FROM sponsorships sa WHERE sa.sponsor_id = t.created_by
+                                      AND sa.student_id = u2.student_id AND sa.is_anonymous = 1)
+                        THEN 'Anonymous well-wisher' ELSE u.full_name END AS by_name
+            FROM transactions t JOIN users u ON u.id = t.created_by JOIN wallets u2 ON u2.id = t.wallet_id
+            WHERE t.wallet_id = ?"
          . ($txFilter !== 'all' ? ' AND t.type = ?' : '')
          . ' ORDER BY t.created_at DESC, t.id DESC LIMIT 15';
     $stmt = $conn->prepare($sql);
@@ -172,7 +178,8 @@ $txTitle = ['all' => 'Recent transactions', 'funding' => 'Funding history', 'spe
               <div>
                 <strong><?= htmlspecialchars($r['full_name']) ?></strong> wants to sponsor you<?= (float) $r['pledge'] > 0 ? ' with up to <strong>' . ksh($r['pledge']) . '</strong> per budget' : '' ?>.
                 <?php if ($r['message']): ?><div class="muted">“<?= htmlspecialchars($r['message']) ?>”</div><?php endif; ?>
-                <div class="muted small">If you accept, they can see your wallet and spending, and must approve your budgets.</div>
+                <?php if (!empty($r['is_anonymous'])): ?><div class="muted small">This well-wisher has chosen to stay anonymous. The administrator knows who they are.</div><?php endif; ?>
+                <div class="muted small">If you accept, they can see your wallet and spending, and can fund a share of your budgets.</div>
               </div>
               <div class="row">
                 <form action="../Backend/respond_sponsorship.php" method="post" class="inline-action">

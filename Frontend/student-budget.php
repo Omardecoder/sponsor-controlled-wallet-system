@@ -49,7 +49,10 @@ if ($wallet) {
 
     // Latest proposal, its amounts, and who asked for changes
     $stmt = $conn->prepare(
-        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at, r.full_name AS reviewer_name
+        'SELECT p.id, p.status, p.sponsor_feedback, p.created_at,
+                CASE WHEN EXISTS (SELECT 1 FROM sponsorships sa JOIN wallets wa ON wa.student_id = sa.student_id
+                                 WHERE wa.id = p.wallet_id AND sa.sponsor_id = p.reviewed_by AND sa.is_anonymous = 1)
+                     THEN \'An anonymous well-wisher\' ELSE r.full_name END AS reviewer_name
          FROM budget_proposals p LEFT JOIN users r ON r.id = p.reviewed_by
          WHERE p.wallet_id = ? ORDER BY p.id DESC LIMIT 1'
     );

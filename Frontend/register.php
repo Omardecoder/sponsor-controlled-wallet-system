@@ -17,9 +17,10 @@ $tagline = 'Sponsor-controlled wallets';
 
 // Roles offered on public registration (value => [label, description])
 $roles = [
-    'student' => ['Student', 'Receive funds and spend within your sponsor\'s rules.'],
-    'sponsor'      => ['Sponsor', 'A parent or guardian who funds a student and approves their budget.'],
-    'organization' => ['Organization', 'A foundation or company that posts sponsorship programs students can apply to.'],
+    'student'      => ['Student', 'Plan a budget, get it funded and record your spending.'],
+    'family'       => ['Family / guardian', 'A parent, guardian or relative who funds a student they know.'],
+    'wellwisher'   => ['Well-wisher', 'A private donor or alumnus. You can choose to stay anonymous to the student.'],
+    'organization' => ['Organization', 'A foundation, church or company that posts sponsorship programs students can apply to.'],
 ];
 ?>
 <!DOCTYPE html>
@@ -143,7 +144,7 @@ $roles = [
 
     /* role choice */
     fieldset { border: 0; }
-    .role-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .role-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
     .role { position: relative; }
     .role input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
     .role-card {

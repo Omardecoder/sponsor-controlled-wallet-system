@@ -24,7 +24,10 @@ function load_proposals(mysqli $conn, int $sponsorId, bool $pending): array
     $sql = "SELECT p.id, p.status, p.created_at, p.reviewed_at, p.reviewed_by, p.sponsor_feedback,
                    w.id AS wallet_id, w.student_id, w.balance, w.status AS wallet_status,
                    u.full_name AS student_name, u.email, u.phone,
-                   sp.pledge AS limit_amount, rv.full_name AS reviewer_name,
+                   sp.pledge AS limit_amount,
+                   CASE WHEN EXISTS (SELECT 1 FROM sponsorships sa WHERE sa.sponsor_id = p.reviewed_by
+                                      AND sa.student_id = w.student_id AND sa.is_anonymous = 1)
+                        THEN 'an anonymous well-wisher' ELSE rv.full_name END AS reviewer_name,
                    r.commit_amount AS my_commit,
                    (SELECT COALESCE(SUM(i.proposed_amount), 0) FROM budget_proposal_items i WHERE i.proposal_id = p.id) AS total
             FROM budget_proposals p
