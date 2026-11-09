@@ -241,6 +241,7 @@ $tagline = 'Sponsor-controlled wallets';
 
           <div class="row">
             <label class="remember"><input type="checkbox" name="remember"> Keep me logged in</label>
+            <a href="forgot-password.php">Forgot password?</a>
           </div>
 
           <button type="submit" class="btn">Log in</button>
