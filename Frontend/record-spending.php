@@ -2,10 +2,13 @@
 // Frontend/record-spending.php
 // Student: record an expense against an approved budget line (optional receipt),
 // and see spending history. Posts to ../Backend/record_expense.php.
+// Step 32: the budget line is suggested while the student types the description (same word list
+// as Backend/auto_category.php). "Choose for me" lets the server pick it.
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
+require_once __DIR__ . '/../Backend/auto_category.php';
 require_role('student');
 
 $studentId = (int) $_SESSION['user_id'];
@@ -59,6 +62,16 @@ if ($wallet) {
 }
 
 $canRecord = $wallet && $wallet['status'] === 'active' && $lines;
+
+// Words that point to each budget line (for the suggestion while typing)
+$wordMap = [];
+if ($lines) {
+    $lineNames = [];
+    foreach ($lines as $l) {
+        $lineNames[$l['category']] = $labels[$l['category']] ?? $l['category'];
+    }
+    $wordMap = category_word_map($conn, (int) $wallet['id'], $lineNames);
+}
 $old += ['description' => '', 'amount' => '', 'category' => '', 'expense_date' => date('Y-m-d')];
 
 $nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
@@ -140,8 +153,8 @@ $active = (($_GET['view'] ?? '') === 'history') ? 'spending' : 'record';
                   </div>
                   <div>
                     <label for="category">Budget line</label>
-                    <select id="category" name="category" required>
-                      <option value="">Choose…</option>
+                    <select id="category" name="category">
+                      <option value="">Choose for me (from the description)</option>
                       <?php foreach ($lines as $l): $left = (float) $l['allocated'] - (float) $l['spent']; ?>
                         <option value="<?= htmlspecialchars($l['category']) ?>" data-left="<?= $left ?>"
                                 <?= $old['category'] === $l['category'] ? 'selected' : '' ?> <?= $left <= 0 ? 'disabled' : '' ?>>
@@ -149,6 +162,7 @@ $active = (($_GET['view'] ?? '') === 'history') ? 'spending' : 'record';
                         </option>
                       <?php endforeach; ?>
                     </select>
+                    <p class="cat-hint" id="cat-hint" aria-live="polite"></p>
                   </div>
                 </div>
 
@@ -289,6 +303,60 @@ $active = (($_GET['view'] ?? '') === 'history') ? 'spending' : 'record';
     amount.addEventListener('input', check);
     cat.addEventListener('change', check);
     check();
+
+    // ---- Step 32: suggest the budget line from the description ----
+    const WORDS = <?= json_encode($wordMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const STOP  = <?= json_encode(CATEGORY_STOPWORDS) ?>;
+    const desc  = document.getElementById('description');
+    const hint  = document.getElementById('cat-hint');
+    let chosenByHand = cat.value !== '';
+    let autoSet = false;
+
+    function tokens(text) {
+      return text.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !STOP.includes(w) && !/^\d+$/.test(w));
+    }
+    function suggest(text) {
+      const score = {}, why = {};
+      for (const t of tokens(text)) {
+        for (const m of WORDS) {
+          if (t === m.w || (m.w.length >= 4 && t.startsWith(m.w))) {
+            score[m.c] = (score[m.c] || 0) + m.n;
+            if (!why[m.c] || m.n > why[m.c].n) why[m.c] = { word: t, n: m.n };
+          }
+        }
+      }
+      let best = null;
+      for (const c in score) if (best === null || score[c] > score[best]) best = c;
+      return best === null ? null : { code: best, word: why[best].word, learned: why[best].n === 3 };
+    }
+    function optionFor(code) { return [...cat.options].find(o => o.value === code); }
+    function nameOf(opt) { return opt.textContent.split('—')[0].trim(); }
+
+    function update() {
+      if (chosenByHand) { hint.textContent = ''; return; }
+      const s = desc.value.trim() ? suggest(desc.value) : null;
+      const opt = s ? optionFor(s.code) : null;
+      if (!opt) {
+        if (autoSet) { cat.value = ''; autoSet = false; }
+        hint.textContent = desc.value.trim() ? 'No match yet: choose the budget line yourself, or keep typing.' : '';
+        hint.className = 'cat-hint';
+        check();
+        return;
+      }
+      if (opt.disabled) {
+        if (autoSet) { cat.value = ''; autoSet = false; }
+        hint.textContent = 'Looks like ' + nameOf(opt) + ', but nothing is left in it.';
+        hint.className = 'cat-hint warn';
+      } else {
+        cat.value = s.code; autoSet = true;
+        hint.textContent = '✓ ' + nameOf(opt) + ', picked from "' + s.word + '"' + (s.learned ? ' (you used it before)' : '') + '. Change it if it is wrong.';
+        hint.className = 'cat-hint ok';
+      }
+      check();
+    }
+    desc.addEventListener('input', update);
+    cat.addEventListener('change', () => { chosenByHand = cat.value !== ''; autoSet = false; if (chosenByHand) hint.textContent = ''; else update(); });
+    update();
   }
 </script>
 </body>

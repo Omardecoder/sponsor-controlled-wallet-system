@@ -430,3 +430,26 @@ label.check input { margin-top: 3px; width: 18px; height: 18px; flex: none; acce
 @media (max-width: 480px) { .browse-filters { grid-template-columns: 1fr; } }
 .story-full { white-space: pre-line; }
 .student-card .bar-top b { white-space: nowrap; }
+
+/* ---------- Step 30: family links, documents, richer browse ---------- */
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.plain-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line, #dfe7e4); }
+.plain-list li:first-child { border-top: 0; }
+.copy-link { display: block; width: 100%; margin-top: 8px; font: inherit; font-size: .85rem; padding: 8px 10px; border: 1px solid currentColor; border-radius: 8px; background: #fff; color: var(--ink, #1d2b29); }
+.ach-list { margin: 4px 0 0 18px; display: grid; gap: 4px; }
+.doc-links { display: grid; gap: 6px; margin-top: 4px; }
+.doc-links a { font-weight: 600; }
+.trust-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.browse-filters.more { grid-template-columns: 1.2fr 1fr 1fr 1fr; }
+.browse-checks { grid-column: 1 / -2; display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 820px) { .browse-filters.more { grid-template-columns: 1fr 1fr; } .browse-checks { grid-column: 1 / -1; } }
+@media (max-width: 480px) { .browse-filters.more { grid-template-columns: 1fr; } }
+.family-box { display: grid; gap: 12px; margin-top: 12px; padding: 14px; border: 1.5px dashed var(--line, #cfdad6); border-radius: 12px; }
+input[type=email] { width: 100%; font: inherit; color: var(--ink); background: #fff; padding: 11px 12px; border: 1.5px solid #cfdad6; border-radius: 10px; }
+input[type=email]:focus { outline: none; border-color: var(--forest); box-shadow: 0 0 0 3px rgba(242, 177, 52, .45); }
+.doc-upload { display: grid; gap: 12px; }
+.doc-upload input[type=file] { font: inherit; font-size: .9rem; }
+
+/* ---------- Step 31: payment settings ---------- */
+.pay-settings { margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--line, #cfdad6); }
+.pay-settings .mini-head { margin: 0; }
