@@ -6,12 +6,14 @@
 //                              each funder's commitment shrinks in the same proportion if needed,
 //                              and the budget becomes active.
 //   action = withdraw       -> cancel the proposal (e.g. to submit a different budget).
+// Step 31: when the budget starts, each funder gets an M-Pesa prompt for their share (auto_collect.php).
 
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/categories.php';
 require_once __DIR__ . '/sponsorship.php';
+require_once __DIR__ . '/auto_collect.php';
 require_role('student');
 
 function back(string $type, string $message): void
@@ -166,4 +168,9 @@ try {
 
 notify_sponsors($conn, $studentId, 'budget_approved', $studentName . ' started their budget with partial funding',
     $note . ' Your part may have been adjusted; see Budget Proposals.', 'sponsor-proposals.php');
-back('success', 'Your budget is active with KSh ' . number_format($totalCents / 100, 2) . '. Record your spending against it as usual.');
+
+// Step 31: each funder gets an M-Pesa prompt for what they still owe of their (adjusted) share
+$prompted = count(request_shares($conn, $proposalId));
+back('success', 'Your budget is active with KSh ' . number_format($totalCents / 100, 2) . '.'
+    . ($prompted > 0 ? ' Your sponsor' . ($prompted === 1 ? '' : 's') . ' got an M-Pesa prompt for their share' . ($prompted === 1 ? '' : 's') . '.' : '')
+    . ' Record your spending against it as usual.');

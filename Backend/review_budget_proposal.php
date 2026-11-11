@@ -17,6 +17,10 @@
 //                       If they are not linked yet, an active sponsorship is created in the same
 //                       transaction (listing = the student's consent), anonymous if they chose so.
 //                       If anything fails, nothing is saved (no sponsorship without a commitment).
+//
+// Step 31: when a commitment makes the budget 100% funded, every funder who still owes part of
+// their share gets an M-Pesa prompt automatically (auto_collect.php). The funder who completed it is
+// taken straight to the payment page for their own prompt.
 
 session_start();
 require_once __DIR__ . '/db.php';
@@ -30,6 +34,7 @@ define('MPESA_READY', is_file(__DIR__ . '/mpesa_config.php'));
 if (MPESA_READY) {
     require_once __DIR__ . '/mpesa_funding.php';
 }
+require_once __DIR__ . '/auto_collect.php';
 
 $fromBrowse      = ($_POST['from_browse'] ?? '') === '1';
 $browseStudentId = (int) ($_POST['student_id'] ?? 0);
@@ -287,6 +292,18 @@ if ($complete) {
     notify_sponsors($conn, $studentId, 'budget_approved', $studentName . '\'s budget is fully funded',
         $sponsorName . ' committed the last ' . $mine . '. The budget is active.', 'sponsor-proposals.php', null, $sponsorId);
     $doneMessage = 'You committed ' . $mine . '. ' . $studentName . '\'s budget is now fully funded and active.';
+
+    // Step 31: ask every funder for their share with an M-Pesa prompt (the payer of "Pay my share now" is skipped)
+    $autoSent = request_shares($conn, $proposalId, $payNow ? [$sponsorId] : []);
+    $others   = count(array_diff(array_keys($autoSent), [$sponsorId]));
+    if ($others > 0) {
+        $doneMessage .= ' M-Pesa prompts were sent to ' . $others . ' other funder' . ($others === 1 ? '' : 's') . ' for their shares.';
+    }
+    if (!$payNow && isset($autoSent[$sponsorId])) {
+        $_SESSION['flash'] = ['type' => 'success', 'message' => $doneMessage . ' Check your phone for the M-Pesa prompt for your share.'];
+        header('Location: ../Frontend/mpesa-wait.php?id=' . $autoSent[$sponsorId]);
+        exit;
+    }
 } else {
     notify($conn, $studentId, 'budget_partly_approved', $sponsorName . ' will fund ' . $mine . ' of your budget',
         'Your budget is now ' . $funding['percent'] . '% funded. KSh ' . number_format($funding['remaining'], 2)
