@@ -8,6 +8,7 @@ require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
 require_once __DIR__ . '/../Backend/sponsorship.php';
+require_once __DIR__ . '/../Backend/auto_collect.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
@@ -27,7 +28,7 @@ unset($_SESSION['flash']);
 // ---- My students: active sponsorships and requests still waiting for the student ----
 $stmt = $conn->prepare(
     "SELECT sp.id AS sponsorship_id, sp.status AS link_status, sp.pledge, sp.created_at AS asked_at,
-            sp.relationship, sp.is_anonymous,
+            sp.relationship, sp.is_anonymous, sp.linked_by,
             u.id AS student_id, u.full_name, u.email, u.phone,
             w.id, w.balance, w.status,
             (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t
@@ -119,12 +120,10 @@ $stmt->execute();
 $recent = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// The sponsor's own phone, used as the default M-Pesa number
-$stmt = $conn->prepare('SELECT phone FROM users WHERE id = ?');
-$stmt->bind_param('i', $sponsorId);
-$stmt->execute();
-$sponsorPhone = (string) ($stmt->get_result()->fetch_assoc()['phone'] ?? '');
-$stmt->close();
+// Payment settings (Step 31): automatic M-Pesa prompts and the number to use.
+// The M-Pesa number (or else the registered phone) is also the default on Send Funds.
+$pay = sponsor_pay_settings($conn, $sponsorId);
+$sponsorPhone = $pay['mpesa_phone'] ? '0' . substr($pay['mpesa_phone'], 3) : (string) $pay['registered'];
 
 // Initials for the profile circle, e.g. "Amina Wanjiru" -> "AW"
 $nameParts = preg_split('/\s+/', trim($_SESSION['full_name']));
@@ -295,6 +294,26 @@ $active = 'dashboard';
               </script>
             </form>
           <?php endif; ?>
+
+          <!-- Payment settings (Step 31) -->
+          <form action="../Backend/pay_settings_action.php" method="post" class="form-grid pay-settings" id="pay-settings">
+            <h4 class="mini-head">Payment settings</h4>
+            <?php if (!$pay['ready']): ?>
+              <p class="muted small">Automatic prompts need the Step 31 database update.</p>
+            <?php else: ?>
+              <label class="check">
+                <input type="checkbox" name="auto_prompt" value="1" <?= $pay['auto'] ? 'checked' : '' ?>>
+                <span><strong>Send me an M-Pesa prompt automatically</strong><br>
+                  <span class="muted small">When a budget you fund becomes active, you get a prompt for what you still owe of your share. Just enter your PIN.</span></span>
+              </label>
+              <div>
+                <label for="mpesa_phone">M-Pesa number for prompts</label>
+                <input type="tel" id="mpesa_phone" name="mpesa_phone" placeholder="<?= htmlspecialchars($pay['registered'] ?: '0712 345 678') ?> (registered number)"
+                       value="<?= $pay['mpesa_phone'] ? htmlspecialchars('0' . substr($pay['mpesa_phone'], 3)) : '' ?>">
+              </div>
+              <button type="submit" class="btn btn-outline">Save settings</button>
+            <?php endif; ?>
+          </form>
         </section>
       </div>
 
@@ -360,7 +379,7 @@ $active = 'dashboard';
           <?php endif; ?>
           <button type="submit" class="btn">Send request</button>
         </form>
-        <p class="muted small" style="margin-top:6px;">The student must accept before you are linked. After that, each budget they send shows up under Budget Proposals, where you choose how much of it to fund.</p>
+        <p class="muted small" style="margin-top:6px;"><?= $isFamily ? 'Students can also link you themselves from their profile, using your email. ' : '' ?>The student must accept before you are linked. After that, each budget they send shows up under Budget Proposals, where you choose how much of it to fund.</p>
 
         <?php if (!$students): ?>
           <p class="empty" style="margin-top:14px;">No students yet.</p>
@@ -377,8 +396,16 @@ $active = 'dashboard';
                       <strong><?= htmlspecialchars($s['full_name']) ?></strong>
                       <?php if ($s['relationship'] && isset(RELATIONSHIPS[$s['relationship']])): ?><span class="pill grey">You are their <?= htmlspecialchars(strtolower(RELATIONSHIPS[$s['relationship']])) ?></span><?php endif; ?>
                       <?php if ((int) $s['is_anonymous'] === 1): ?><span class="pill grey">Anonymous to student</span><?php endif; ?>
+                      <?php if ($isActive && $s['linked_by'] === 'student'): ?><span class="pill grey">Linked by the student</span><?php endif; ?>
                       <div class="muted small"><?= htmlspecialchars($s['email']) ?> · <?= htmlspecialchars($s['phone']) ?></div>
                       <?php if ($s['co_sponsors']): ?><div class="muted small">Also sponsored by <?= htmlspecialchars($s['co_sponsors']) ?></div><?php endif; ?>
+                      <?php if ($isActive && $s['linked_by'] === 'student'): ?>
+                        <form action="../Backend/sponsorship_action.php" method="post" class="anon-toggle" onsubmit="return confirm('Remove the link <?= htmlspecialchars(addslashes($s['full_name'])) ?> made? You will stop seeing their wallet and they cannot link you again.');">
+                          <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">
+                          <input type="hidden" name="action" value="remove">
+                          <button type="submit" class="link-btn">Not you? Remove this link</button>
+                        </form>
+                      <?php endif; ?>
                       <?php if ($isWellWisher): ?>
                         <form action="../Backend/sponsorship_action.php" method="post" class="anon-toggle">
                           <input type="hidden" name="sponsorship_id" value="<?= (int) $s['sponsorship_id'] ?>">

@@ -8,6 +8,7 @@ require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
 require_once __DIR__ . '/../Backend/sponsorship.php';
+require_once __DIR__ . '/../Backend/student_docs.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
@@ -76,6 +77,9 @@ $total  = $funding['total'] ?? 0;
 $maxNow = $funding['remaining'] ?? 0;
 $maxPct = $total > 0 ? floor($maxNow / $total * 10000) / 100 : 0;
 
+$achievements = student_achievements($conn, $studentId);
+$documents    = student_documents($conn, $studentId);
+
 // Once linked, the well-wisher may see the full name (like any sponsor); before that, first name + initial
 $shownName = $isMine ? $student['full_name'] : public_student_name($student['full_name']);
 
@@ -132,6 +136,25 @@ $active = 'browse';
           </div>
           <h4 class="mini-head">Their story</h4>
           <p class="story-full"><?= htmlspecialchars((string) $student['story']) ?></p>
+
+          <?php if ($achievements): ?>
+            <h4 class="mini-head" style="margin-top:18px;">Achievements</h4>
+            <ul class="ach-list">
+              <?php foreach ($achievements as $a): ?><li><?= htmlspecialchars($a) ?></li><?php endforeach; ?>
+            </ul>
+          <?php endif; ?>
+
+          <h4 class="mini-head" style="margin-top:18px;">Supporting documents</h4>
+          <?php if ($documents): ?>
+            <div class="doc-links">
+              <?php foreach ($documents as $d): ?>
+                <div><a href="../Backend/view_student_document.php?id=<?= (int) $d['id'] ?>" target="_blank" rel="noopener"><?= htmlspecialchars(STUDENT_DOC_TYPES[$d['doc_type']] ?? 'Document') ?></a>
+                  <span class="muted small">· <?= strtoupper(htmlspecialchars(DOC_MIME[$d['mime']] ?? '')) ?> · added <?= htmlspecialchars(date('j M Y', strtotime($d['created_at']))) ?></span></div>
+              <?php endforeach; ?>
+            </div>
+          <?php else: ?>
+            <p class="muted small">No documents uploaded.</p>
+          <?php endif; ?>
 
           <?php if ($funding): ?>
             <h4 class="mini-head" style="margin-top:18px;">Budget</h4>

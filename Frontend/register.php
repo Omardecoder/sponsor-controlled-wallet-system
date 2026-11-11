@@ -6,11 +6,30 @@
 // Admin accounts must never be selectable here. Create them manually
 // in the database or from a protected admin-only page.
 
+// Step 30: a STUDENT says who will fund them (family and/or well-wishers) and can link a family
+// member by email right here. A family member who opens an invitation link (register.php?invite=...)
+// registers as Family and is linked to the student automatically.
+
 session_start();
+require_once __DIR__ . '/../Backend/db.php';
+require_once __DIR__ . '/../Backend/family_link.php';
+
 $errors = $_SESSION['register_errors'] ?? [];
 $old    = $_SESSION['register_old'] ?? [];
 unset($_SESSION['register_errors'], $_SESSION['register_old']);
-$old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => ''];
+$old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => '', 'invite' => '',
+         'fund_family' => '', 'fund_wellwishers' => '', 'family_email' => '', 'relationship' => ''];
+
+// Invitation from a student?
+$inviteToken = (string) ($_GET['invite'] ?? $old['invite']);
+$invite = $inviteToken !== '' ? find_invite($conn, $inviteToken) : null;
+$inviteBad = $inviteToken !== '' && !$invite;
+if ($invite) {
+    $old['role'] = 'family';
+    if ($old['email'] === '') {
+        $old['email'] = $invite['email'];
+    }
+}
 
 $appName = 'SS-Wallet';          // change to your system name
 $tagline = 'Sponsor-controlled wallets';
@@ -179,6 +198,20 @@ $roles = [
       font-size: .92rem; font-weight: 500;
     }
     .alert ul { margin-left: 18px; }
+    .alert-info { background: #e4efe9; border-color: #a9cbbf; color: var(--forest); }
+
+    /* student: who funds you */
+    select {
+      width: 100%; font: inherit; color: var(--ink); background: var(--white);
+      border: 1.5px solid var(--line); border-radius: 10px; padding: 12px 12px;
+    }
+    select:focus { outline: none; border-color: var(--forest); box-shadow: 0 0 0 3px rgba(242, 177, 52, .45); }
+    .fund-box { display: grid; gap: 12px; }
+    .fund-box[hidden], .family-fields[hidden] { display: none; }
+    .tick { display: flex; gap: 10px; align-items: flex-start; font-size: .92rem; }
+    .tick input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--forest); }
+    .tick span span { display: block; font-size: .82rem; color: var(--muted); }
+    .family-fields { display: grid; gap: 12px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--white); }
     .login-link { margin-top: 24px; text-align: center; color: var(--muted); }
     .admin-note { margin-top: 14px; text-align: center; font-size: .8rem; color: var(--muted); }
 
@@ -236,6 +269,15 @@ $roles = [
         <h2>Create your account</h2>
         <p class="sub">It takes less than a minute.</p>
 
+        <?php if ($invite): ?>
+          <div class="alert alert-info" role="status">
+            <strong><?= htmlspecialchars($invite['student_name']) ?></strong> invited you as their <?= htmlspecialchars(strtolower(RELATIONSHIPS[$invite['relationship']] ?? 'family member')) ?>.
+            Create your Family account with <strong><?= htmlspecialchars($invite['email']) ?></strong> and you will be linked automatically.
+          </div>
+        <?php elseif ($inviteBad): ?>
+          <div class="alert" role="alert">This invitation link has expired or was cancelled. You can still create an account; the student can link you again from their profile.</div>
+        <?php endif; ?>
+
         <?php if ($errors): ?>
           <div class="alert" role="alert">
             <ul>
@@ -245,6 +287,7 @@ $roles = [
         <?php endif; ?>
 
         <form action="../Backend/register_process.php" method="post" novalidate>
+          <?php if ($invite): ?><input type="hidden" name="invite" value="<?= htmlspecialchars($inviteToken) ?>"><?php endif; ?>
 
           <div class="field">
             <label for="full_name">Full name <span style="font-weight:400;color:var(--muted);">(or organization name)</span></label>
@@ -281,7 +324,7 @@ $roles = [
           <fieldset>
             <legend class="legend">I am registering as a</legend>
             <div class="role-grid">
-              <?php foreach ($roles as $value => [$label, $desc]): ?>
+              <?php foreach ($roles as $value => [$label, $desc]): if ($invite && $value !== 'family') { continue; } ?>
                 <label class="role">
                   <input type="radio" name="role" value="<?= htmlspecialchars($value) ?>" <?= $old['role'] === $value ? 'checked' : '' ?> required>
                   <span class="role-card">
@@ -292,6 +335,39 @@ $roles = [
               <?php endforeach; ?>
             </div>
           </fieldset>
+
+          <?php if (!$invite): ?>
+          <!-- Students only: who will fund you? -->
+          <fieldset class="fund-box" id="fund-box" <?= $old['role'] === 'student' ? '' : 'hidden' ?>>
+            <legend class="legend">Who will fund you? <span style="font-weight:400;color:var(--muted);">(tick one or both)</span></legend>
+            <label class="tick">
+              <input type="checkbox" name="fund_family" value="1" id="fund_family" <?= $old['fund_family'] ? 'checked' : '' ?>>
+              <span><strong>My family</strong><span>Link a parent, guardian or relative now. They don't need to send you a request.</span></span>
+            </label>
+            <div class="family-fields" id="family-fields" <?= $old['fund_family'] ? '' : 'hidden' ?>>
+              <div class="two-col">
+                <div class="field">
+                  <label for="family_email">Their email</label>
+                  <input type="email" id="family_email" name="family_email" placeholder="mum@example.com" value="<?= htmlspecialchars($old['family_email']) ?>">
+                </div>
+                <div class="field">
+                  <label for="relationship">They are my</label>
+                  <select id="relationship" name="relationship">
+                    <option value="">Choose…</option>
+                    <?php foreach (RELATIONSHIPS as $code => $label): ?>
+                      <option value="<?= $code ?>" <?= $old['relationship'] === $code ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+              </div>
+              <p class="hint" style="margin-top:-4px;">If they have no account yet, we email them an invitation and link you when they sign up.</p>
+            </div>
+            <label class="tick">
+              <input type="checkbox" name="fund_wellwishers" value="1" <?= $old['fund_wellwishers'] ? 'checked' : '' ?>>
+              <span><strong>Well-wishers</strong><span>Private donors who browse students. After you log in, fill in My Profile to be listed.</span></span>
+            </label>
+          </fieldset>
+          <?php endif; ?>
 
           <button type="submit" class="btn">Create account</button>
         </form>
@@ -305,6 +381,15 @@ $roles = [
 
   <script>
     // Show / hide password (works for both password fields)
+    // Students: show "Who will fund you?" and the family fields only when they apply
+    const fundBox = document.getElementById('fund-box');
+    const famTick = document.getElementById('fund_family');
+    const famBox  = document.getElementById('family-fields');
+    document.querySelectorAll('input[name="role"]').forEach(r => r.addEventListener('change', () => {
+      if (fundBox) fundBox.hidden = document.querySelector('input[name="role"]:checked').value !== 'student';
+    }));
+    if (famTick) famTick.addEventListener('change', () => { famBox.hidden = !famTick.checked; });
+
     document.querySelectorAll('.toggle').forEach(btn => {
       btn.addEventListener('click', () => {
         const input = document.getElementById(btn.dataset.target);

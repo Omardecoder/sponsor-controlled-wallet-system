@@ -3,13 +3,15 @@
 // Well-wishers: browse students who chose to be listed, and pick whom to fund.
 // Each card shows only the first name and initial, institution, course, year, story and the
 // student's open budget (categories, % funded, amount still needed). No email or phone.
-// Filters: search (institution / course), category, amount still needed, sort.
+// Filters: search (institution / course), category, amount still needed, has documents, has achievements.
+// Sort: least / most funded, smallest / largest budget, most achievements, newest. (Step 30)
 // "View and fund" opens sponsor-student.php?id=...
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/auth.php';
 require_once __DIR__ . '/../Backend/categories.php';
 require_once __DIR__ . '/../Backend/sponsorship.php';
+require_once __DIR__ . '/../Backend/student_docs.php';
 require_role('sponsor');
 
 $sponsorId = (int) $_SESSION['user_id'];
@@ -26,6 +28,8 @@ $q        = trim($_GET['q'] ?? '');
 $catQ     = trim($_GET['category'] ?? '');
 $need     = $_GET['need'] ?? '';
 $sort     = $_GET['sort'] ?? 'need';
+$hasDocs  = !empty($_GET['docs']);
+$hasAch   = !empty($_GET['ach']);
 $needBands = [
     ''      => 'Any amount',
     'small' => 'Up to KSh 10,000',
@@ -35,6 +39,9 @@ $needBands = [
 $sorts = [
     'need'    => 'Least funded first',
     'closest' => 'Closest to fully funded',
+    'smallest'=> 'Smallest budget',
+    'largest' => 'Largest budget',
+    'achieve' => 'Most achievements',
     'newest'  => 'Newest budgets',
 ];
 if (!isset($needBands[$need])) { $need = ''; }
@@ -44,7 +51,8 @@ if (!isset($sorts[$sort]))     { $sort = 'need'; }
 $rows = [];
 $ready = true;
 try {
-    $sql = "SELECT u.id, u.full_name, u.institution, u.course, u.year_of_study, u.story,
+    $sql = "SELECT u.id, u.full_name, u.institution, u.course, u.year_of_study, u.story, u.achievements,
+                   (SELECT COUNT(*) FROM student_documents d WHERE d.student_id = u.id) AS doc_count,
                    w.id AS wallet_id,
                    (SELECT MAX(p.id) FROM budget_proposals p WHERE p.wallet_id = w.id AND p.status = 'pending') AS proposal_id,
                    (SELECT sp.status FROM sponsorships sp WHERE sp.student_id = u.id AND sp.sponsor_id = ?) AS my_link
@@ -63,7 +71,7 @@ try {
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 } catch (Throwable $e) {
-    $ready = false;   // Step 29 SQL not run yet
+    $ready = false;   // Step 29 / Step 30 SQL not run yet
 }
 
 $cards = [];
@@ -71,6 +79,9 @@ $itemStmt = $conn->prepare('SELECT category, proposed_amount FROM budget_proposa
 $dateStmt = $conn->prepare('SELECT created_at FROM budget_proposals WHERE id = ?');
 foreach ($rows as $r) {
     $card = $r + ['budget' => null, 'cats' => []];
+    $card['ach'] = achievements_list($r['achievements']);
+    if ($hasDocs && (int) $r['doc_count'] === 0) { continue; }
+    if ($hasAch && !$card['ach']) { continue; }
     if ($r['proposal_id']) {
         $pid = (int) $r['proposal_id'];
         $f   = proposal_funding($conn, $pid, (int) $r['id']);
@@ -112,9 +123,15 @@ usort($cards, function ($a, $b) use ($sort) {
     $aOpen = $a['budget'] && $a['budget']['remaining'] > 0;
     $bOpen = $b['budget'] && $b['budget']['remaining'] > 0;
     if ($aOpen !== $bOpen) { return $aOpen ? -1 : 1; }
+    if ($sort === 'achieve' && count($a['ach']) !== count($b['ach'])) {
+        return count($b['ach']) <=> count($a['ach']);
+    }
     if (!$aOpen) { return strcmp($a['full_name'], $b['full_name']); }
     return match ($sort) {
         'closest' => $b['budget']['percent'] <=> $a['budget']['percent'],
+        'smallest'=> $a['budget']['total'] <=> $b['budget']['total'],
+        'largest' => $b['budget']['total'] <=> $a['budget']['total'],
+        'achieve' => $a['budget']['percent'] <=> $b['budget']['percent'],
         'newest'  => strcmp((string) $b['budget']['created'], (string) $a['budget']['created']),
         default   => $a['budget']['percent'] <=> $b['budget']['percent'],
     };
@@ -160,7 +177,7 @@ $active = 'browse';
       <div class="page-head">
         <div>
           <h2>Choose a student to support</h2>
-          <p class="muted">These students chose to be listed. You see their first name, studies, story and budget. Open a student to fund a % or an amount of their budget; you can stay anonymous.</p>
+          <p class="muted">These students chose to be listed. You see their first name, studies, story, achievements, documents and budget. Open a student to fund a % or an amount of their budget; you can stay anonymous.</p>
         </div>
       </div>
 
@@ -169,10 +186,10 @@ $active = 'browse';
       <?php endif; ?>
 
       <?php if (!$ready): ?>
-        <div class="alert error">The Students page is not set up yet. Ask the administrator to run the Step 29 database update.</div>
+        <div class="alert error">The Students page is not set up yet. Ask the administrator to run the Step 29 and Step 30 database updates.</div>
       <?php endif; ?>
 
-      <form method="get" class="card filters browse-filters">
+      <form method="get" class="card filters browse-filters more">
         <div>
           <label for="q">Institution or course</label>
           <input type="text" id="q" name="q" value="<?= htmlspecialchars($q) ?>" placeholder="e.g. Strathmore, BBIT">
@@ -197,11 +214,15 @@ $active = 'browse';
             <?php endforeach; ?>
           </select>
         </div>
+        <div class="browse-checks">
+          <label class="check"><input type="checkbox" name="docs" value="1" <?= $hasDocs ? 'checked' : '' ?>> <span>Has documents</span></label>
+          <label class="check"><input type="checkbox" name="ach" value="1" <?= $hasAch ? 'checked' : '' ?>> <span>Has achievements</span></label>
+        </div>
         <div class="filter-actions"><button type="submit" class="btn"><?= sw_icon('search') ?>Show</button></div>
       </form>
 
       <?php if ($ready && !$cards): ?>
-        <section class="card"><p class="empty">No listed students match<?= ($q || $catQ || $need) ? ' these filters' : ' yet' ?>.</p></section>
+        <section class="card"><p class="empty">No listed students match<?= ($q || $catQ || $need || $hasDocs || $hasAch) ? ' these filters' : ' yet' ?>.</p></section>
       <?php endif; ?>
 
       <div class="student-cards">
@@ -217,6 +238,12 @@ $active = 'browse';
               <div class="muted small"><?= htmlspecialchars($c['institution'] ?? '') ?> · <?= htmlspecialchars($c['course'] ?? '') ?><?= $c['year_of_study'] ? ' · Year ' . (int) $c['year_of_study'] : '' ?></div>
             </div>
             <p class="story"><?= htmlspecialchars(mb_strimwidth((string) $c['story'], 0, 180, '…')) ?></p>
+            <?php if ($c['ach'] || (int) $c['doc_count'] > 0): ?>
+              <div class="trust-row">
+                <?php if ($c['ach']): ?><span class="pill green" title="<?= htmlspecialchars(implode(' · ', $c['ach'])) ?>">★ <?= htmlspecialchars(mb_strimwidth($c['ach'][0], 0, 40, '…')) ?><?= count($c['ach']) > 1 ? ' +' . (count($c['ach']) - 1) : '' ?></span><?php endif; ?>
+                <?php if ((int) $c['doc_count'] > 0): ?><span class="pill grey"><?= (int) $c['doc_count'] ?> document<?= (int) $c['doc_count'] === 1 ? '' : 's' ?></span><?php endif; ?>
+              </div>
+            <?php endif; ?>
 
             <?php if ($b): ?>
               <div class="chips-row">
