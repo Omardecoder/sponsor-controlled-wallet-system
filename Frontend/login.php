@@ -168,41 +168,26 @@ $tagline = 'Sponsor-controlled wallets';
       .form-side { place-items: start center; padding-top: 48px; }
     }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+    /* Left panel: just a wallet picture on green */
+    .brand-side.brand-art { justify-content: center; align-items: center; }
+    .wallet-art {
+      width: min(240px, 55%); aspect-ratio: 1; border-radius: 28%;
+      background: var(--saffron); color: var(--forest);
+      display: grid; place-items: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .25);
+    }
+    .wallet-art svg { width: 56%; height: 56%; }
   </style>
 </head>
 <body>
   <div class="page">
 
     <!-- Brand side -->
-    <aside class="brand-side">
-      <div class="logo">
-        <div class="logo-mark" aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor"/></svg>
-        </div>
-        <div>
-          <div class="logo-name"><?= htmlspecialchars($appName) ?></div>
-          <div class="logo-tag"><?= htmlspecialchars($tagline) ?></div>
-        </div>
+    <aside class="brand-side brand-art" aria-hidden="true">
+      <div class="wallet-art">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor"/></svg>
       </div>
-
-      <div class="pitch">
-        <h1>Money that goes where you meant it to.</h1>
-        <p>Fund a wallet, set what it can be spent on, and see every transaction as it happens.</p>
-
-        <div class="wallet" aria-hidden="true">
-          <div class="wallet-top">
-            <span class="wallet-label">School wallet</span>
-            <span class="wallet-amount"><small>KES</small>12,400</span>
-          </div>
-          <ul class="rules">
-            <li><span class="dot ok"></span>School fees <span class="state">Allowed</span></li>
-            <li><span class="dot ok"></span>Books and stationery <span class="state">Allowed</span></li>
-            <li><span class="dot no"></span>Betting and gaming <span class="state">Blocked</span></li>
-          </ul>
-        </div>
-      </div>
-
-      <p class="foot-note">&copy; <?= date('Y') ?> <?= htmlspecialchars($appName) ?></p>
     </aside>
 
     <!-- Form side -->

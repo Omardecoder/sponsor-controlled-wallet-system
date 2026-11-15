@@ -453,3 +453,8 @@ input[type=email]:focus { outline: none; border-color: var(--forest); box-shadow
 /* ---------- Step 31: payment settings ---------- */
 .pay-settings { margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--line, #cfdad6); }
 .pay-settings .mini-head { margin: 0; }
+
+/* ---------- Step 32: automatic budget line ---------- */
+.cat-hint { font-size: .82rem; margin: 6px 0 0; color: var(--muted); min-height: 1.1em; }
+.cat-hint.ok { color: #1d6b3a; }
+.cat-hint.warn { color: var(--danger); }

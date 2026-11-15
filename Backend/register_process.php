@@ -4,9 +4,9 @@
 // Public registration can only create student or sponsor accounts (family, well-wisher or organization).
 // An organization is verified later by the admin.
 
-// Step 30: a student can tick "My family" and give a family member's email (linked or invited right
-// after the account is created), and/or "Well-wishers" (reminded to fill in My Profile to be listed).
 // A family member registering from an invitation link (invite=TOKEN) is linked to that student.
+// Students choose who funds them AFTER registering, in My Profile: link family by email, and/or
+// "Show me to well-wishers". The registration form no longer asks.
 
 session_start();
 require_once __DIR__ . '/db.php';
@@ -42,20 +42,12 @@ if ($role === 'sponsor') {
     $role = 'wellwisher';   // old form value
 }
 
-// Student: who will fund you
-$fundFamily      = $role === 'student' && !empty($_POST['fund_family']);
-$fundWellWishers = $role === 'student' && !empty($_POST['fund_wellwishers']);
-$familyEmail     = strtolower(trim($_POST['family_email'] ?? ''));
-$relationship    = $_POST['relationship'] ?? '';
-
 // Invitation from a student (family members only)
 $inviteToken = (string) ($_POST['invite'] ?? '');
 $invite      = $inviteToken !== '' ? find_invite($conn, $inviteToken) : null;
 
 $old = ['full_name' => $full_name, 'email' => $email, 'phone' => $phone_raw, 'role' => $role,
-        'password' => '', 'confirm_password' => '', 'invite' => $invite ? $inviteToken : '',
-        'fund_family' => $fundFamily ? '1' : '', 'fund_wellwishers' => $fundWellWishers ? '1' : '',
-        'family_email' => $familyEmail, 'relationship' => $relationship];
+        'password' => '', 'confirm_password' => '', 'invite' => $invite ? $inviteToken : '',];
 $errors = [];
 
 // ---- Validation ----
@@ -78,21 +70,6 @@ if (!in_array($role, ALLOWED_ROLES, true)) {
     $errors[] = 'Choose Student, Family / guardian, Well-wisher or Organization.';
 }
 
-if ($role === 'student') {
-    if (!$fundFamily && !$fundWellWishers) {
-        $errors[] = 'Tell us who will fund you: your family, well-wishers or both.';
-    }
-    if ($fundFamily) {
-        if (!filter_var($familyEmail, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'Enter your family member\'s email address.';
-        } elseif ($familyEmail === $email) {
-            $errors[] = 'Enter your family member\'s email, not your own.';
-        }
-        if (!isset(RELATIONSHIPS[$relationship])) {
-            $errors[] = 'Choose how your family member is related to you.';
-        }
-    }
-}
 if ($inviteToken !== '' && !$invite) {
     $errors[] = 'This invitation link has expired or was cancelled. Remove it from the address bar to register normally.';
 }
@@ -157,20 +134,9 @@ if ($invite) {
     }
 }
 
-// Student: link the family member now (linked if they have a Family account, otherwise invited)
+// Student: who funds them is set up in My Profile after logging in
 if ($role === 'student') {
-    if ($fundFamily) {
-        $r = link_family($conn, $newId, $full_name, $email, $familyEmail, $relationship);
-        $message .= ' ' . $r['message'];
-        if (!empty($r['invite_link'])) {
-            $message .= ' ' . $r['invite_link'];
-        } elseif ($r['type'] === 'error') {
-            $message .= ' You can try again from My Profile.';
-        }
-    }
-    if ($fundWellWishers) {
-        $message .= ' To be found by well-wishers, open My Profile after you log in and tick "Show me to well-wishers".';
-    }
+    $message .= ' After you log in, open My Profile to link your family or to be shown to well-wishers.';
 }
 
 $_SESSION['flash_success'] = $message;

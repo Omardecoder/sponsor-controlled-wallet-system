@@ -8,11 +8,14 @@
 //   3. adds the amount to that category's "spent" in budget_allocations
 //   4. saves the expense (and the receipt file name) in expenses
 // The expense is refused if it is more than what is left in the category or in the wallet.
+// Step 32: if the student leaves the budget line on "Choose for me", it is picked from the
+// description (auto_category.php): their own past expenses first, then common spending words.
 
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/auto_category.php';
 require_role('student');
 
 const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;   // 5 MB
@@ -50,6 +53,32 @@ if ($description === '' || mb_strlen($description) > 255) {
 }
 if (!preg_match('/^\d{1,9}(\.\d{1,2})?$/', $amountIn) || (float) $amountIn <= 0) {
     back('error', 'Enter a valid amount greater than zero, for example 350 or 350.50.', $old);
+}
+$autoPicked = null;
+if ($category === '' && $description !== '') {
+    // "Choose for me": the student's approved lines that still have money left
+    $stmt = $conn->prepare(
+        'SELECT a.category FROM budget_allocations a JOIN wallets w ON w.id = a.wallet_id
+         WHERE w.student_id = ? AND a.allocated > a.spent'
+    );
+    $stmt->bind_param('i', $studentId);
+    $stmt->execute();
+    $open = array_column($stmt->get_result()->fetch_all(MYSQLI_ASSOC), 'category');
+    $stmt->close();
+    $stmt = $conn->prepare('SELECT id FROM wallets WHERE student_id = ?');
+    $stmt->bind_param('i', $studentId);
+    $stmt->execute();
+    $wid = (int) ($stmt->get_result()->fetch_assoc()['id'] ?? 0);
+    $stmt->close();
+
+    $names = array_intersect_key(budget_categories(), array_flip($open));
+    $pick  = $wid ? suggest_category(category_word_map($conn, $wid, $names), $description) : null;
+    if ($pick) {
+        $category   = $pick['code'];
+        $autoPicked = $pick;
+    } else {
+        back('error', 'We could not tell which budget line "' . $description . '" belongs to. Choose the budget line yourself.', $old);
+    }
 }
 if (!array_key_exists($category, budget_categories())) {
     back('error', 'Choose a budget line.', $old);
@@ -244,4 +273,5 @@ if (!$receipt && (float) $amount >= LARGE_EXPENSE_KSH) {
 }
 
 back('success', 'Recorded KSh ' . number_format((float) $amount, 2) . ' for ' . budget_categories()[$category]
+    . ($autoPicked ? ' (picked automatically from "' . $autoPicked['word'] . '")' : '')
     . ($receipt ? ' with a receipt' : '') . '. New balance: KSh ' . number_format((float) $newBalance, 2) . '.');

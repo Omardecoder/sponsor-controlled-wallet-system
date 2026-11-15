@@ -6,23 +6,27 @@
 // Admin accounts must never be selectable here. Create them manually
 // in the database or from a protected admin-only page.
 
-// Step 30: a STUDENT says who will fund them (family and/or well-wishers) and can link a family
-// member by email right here. A family member who opens an invitation link (register.php?invite=...)
-// registers as Family and is linked to the student automatically.
+// A family member who opens an invitation link (register.php?invite=...) registers as Family and is
+// linked to the student automatically. Students link family / choose well-wishers later in My Profile.
 
 session_start();
 require_once __DIR__ . '/../Backend/db.php';
 require_once __DIR__ . '/../Backend/family_link.php';
 
+// Safety net: the page must always show the form and its button, even if a Backend file is missing or empty
+if (!defined('RELATIONSHIPS')) {
+    define('RELATIONSHIPS', ['mother' => 'Mother', 'father' => 'Father', 'guardian' => 'Guardian',
+        'sibling' => 'Brother / sister', 'relative' => 'Other relative']);
+}
+
 $errors = $_SESSION['register_errors'] ?? [];
 $old    = $_SESSION['register_old'] ?? [];
 unset($_SESSION['register_errors'], $_SESSION['register_old']);
-$old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => '', 'invite' => '',
-         'fund_family' => '', 'fund_wellwishers' => '', 'family_email' => '', 'relationship' => ''];
+$old += ['full_name' => '', 'email' => '', 'phone' => '', 'role' => '', 'invite' => ''];
 
 // Invitation from a student?
 $inviteToken = (string) ($_GET['invite'] ?? $old['invite']);
-$invite = $inviteToken !== '' ? find_invite($conn, $inviteToken) : null;
+$invite = ($inviteToken !== '' && function_exists('find_invite')) ? find_invite($conn, $inviteToken) : null;
 $inviteBad = $inviteToken !== '' && !$invite;
 if ($invite) {
     $old['role'] = 'family';
@@ -200,18 +204,6 @@ $roles = [
     .alert ul { margin-left: 18px; }
     .alert-info { background: #e4efe9; border-color: #a9cbbf; color: var(--forest); }
 
-    /* student: who funds you */
-    select {
-      width: 100%; font: inherit; color: var(--ink); background: var(--white);
-      border: 1.5px solid var(--line); border-radius: 10px; padding: 12px 12px;
-    }
-    select:focus { outline: none; border-color: var(--forest); box-shadow: 0 0 0 3px rgba(242, 177, 52, .45); }
-    .fund-box { display: grid; gap: 12px; }
-    .fund-box[hidden], .family-fields[hidden] { display: none; }
-    .tick { display: flex; gap: 10px; align-items: flex-start; font-size: .92rem; }
-    .tick input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--forest); }
-    .tick span span { display: block; font-size: .82rem; color: var(--muted); }
-    .family-fields { display: grid; gap: 12px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--white); }
     .login-link { margin-top: 24px; text-align: center; color: var(--muted); }
     .admin-note { margin-top: 14px; text-align: center; font-size: .8rem; color: var(--muted); }
 
@@ -225,35 +217,26 @@ $roles = [
       .two-col, .role-grid { grid-template-columns: 1fr; }
     }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+    /* Left panel: just a wallet picture on green */
+    .brand-side.brand-art { justify-content: center; align-items: center; }
+    .wallet-art {
+      width: min(240px, 55%); aspect-ratio: 1; border-radius: 28%;
+      background: var(--saffron); color: var(--forest);
+      display: grid; place-items: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .25);
+    }
+    .wallet-art svg { width: 56%; height: 56%; }
   </style>
 </head>
 <body>
   <div class="page">
 
     <!-- Brand side -->
-    <aside class="brand-side">
-      <div class="logo">
-        <div class="logo-mark" aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor"/></svg>
-        </div>
-        <div>
-          <div class="logo-name"><?= htmlspecialchars($appName) ?></div>
-          <div class="logo-tag"><?= htmlspecialchars($tagline) ?></div>
-        </div>
+    <aside class="brand-side brand-art" aria-hidden="true">
+      <div class="wallet-art">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor"/></svg>
       </div>
-
-      <div class="pitch">
-        <h1>Set up in a minute. Spend with confidence.</h1>
-        <p>Pick the role that fits you. Sponsors fund and control. Students spend within the rules.</p>
-
-        <div class="flow" aria-hidden="true">
-          <div class="flow-step"><strong>Sponsor funds the wallet</strong><span>Adds money and sets spending rules</span></div>
-          <div class="flow-link"></div>
-          <div class="flow-step"><strong>Student spends</strong><span>Only on what the sponsor allows</span></div>
-        </div>
-      </div>
-
-      <p class="foot-note">&copy; <?= date('Y') ?> <?= htmlspecialchars($appName) ?></p>
     </aside>
 
     <!-- Form side -->
@@ -336,38 +319,6 @@ $roles = [
             </div>
           </fieldset>
 
-          <?php if (!$invite): ?>
-          <!-- Students only: who will fund you? -->
-          <fieldset class="fund-box" id="fund-box" <?= $old['role'] === 'student' ? '' : 'hidden' ?>>
-            <legend class="legend">Who will fund you? <span style="font-weight:400;color:var(--muted);">(tick one or both)</span></legend>
-            <label class="tick">
-              <input type="checkbox" name="fund_family" value="1" id="fund_family" <?= $old['fund_family'] ? 'checked' : '' ?>>
-              <span><strong>My family</strong><span>Link a parent, guardian or relative now. They don't need to send you a request.</span></span>
-            </label>
-            <div class="family-fields" id="family-fields" <?= $old['fund_family'] ? '' : 'hidden' ?>>
-              <div class="two-col">
-                <div class="field">
-                  <label for="family_email">Their email</label>
-                  <input type="email" id="family_email" name="family_email" placeholder="mum@example.com" value="<?= htmlspecialchars($old['family_email']) ?>">
-                </div>
-                <div class="field">
-                  <label for="relationship">They are my</label>
-                  <select id="relationship" name="relationship">
-                    <option value="">Choose…</option>
-                    <?php foreach (RELATIONSHIPS as $code => $label): ?>
-                      <option value="<?= $code ?>" <?= $old['relationship'] === $code ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                </div>
-              </div>
-              <p class="hint" style="margin-top:-4px;">If they have no account yet, we email them an invitation and link you when they sign up.</p>
-            </div>
-            <label class="tick">
-              <input type="checkbox" name="fund_wellwishers" value="1" <?= $old['fund_wellwishers'] ? 'checked' : '' ?>>
-              <span><strong>Well-wishers</strong><span>Private donors who browse students. After you log in, fill in My Profile to be listed.</span></span>
-            </label>
-          </fieldset>
-          <?php endif; ?>
 
           <button type="submit" class="btn">Create account</button>
         </form>
@@ -381,15 +332,6 @@ $roles = [
 
   <script>
     // Show / hide password (works for both password fields)
-    // Students: show "Who will fund you?" and the family fields only when they apply
-    const fundBox = document.getElementById('fund-box');
-    const famTick = document.getElementById('fund_family');
-    const famBox  = document.getElementById('family-fields');
-    document.querySelectorAll('input[name="role"]').forEach(r => r.addEventListener('change', () => {
-      if (fundBox) fundBox.hidden = document.querySelector('input[name="role"]:checked').value !== 'student';
-    }));
-    if (famTick) famTick.addEventListener('change', () => { famBox.hidden = !famTick.checked; });
-
     document.querySelectorAll('.toggle').forEach(btn => {
       btn.addEventListener('click', () => {
         const input = document.getElementById(btn.dataset.target);
